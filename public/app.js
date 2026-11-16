@@ -1253,14 +1253,48 @@ function renderAccesoCelular(info) {
   const lista = $('#lan-list');
   if (!lista) return;
 
-  const direcciones = info && Array.isArray(info.direcciones) ? info.direcciones : [];
-  if (!direcciones.length) {
+  const enNube = Boolean(info && info.modo === 'nube');
+  const direcciones =
+    info && Array.isArray(info.direcciones) ? info.direcciones : [];
+
+  const titulo = $('#lan-titulo');
+  const ayuda = $('#lan-ayuda');
+  const nota = $('#lan-nota');
+  if (titulo) {
+    titulo.textContent = enNube
+      ? 'Acceso desde cualquier lugar'
+      : 'Acceso desde el celular';
+  }
+  if (ayuda) {
+    ayuda.textContent = enNube
+      ? 'Esta instalación está en línea. Abre esta dirección en el teléfono, con datos móviles o cualquier Wi-Fi.'
+      : 'Abre una de estas direcciones en el teléfono, conectado al mismo Wi-Fi que esta computadora.';
+  }
+  if (nota) {
+    nota.textContent = enNube
+      ? 'Escribe esta misma dirección en la app Android (TurnoYa) la primera vez que la abres.'
+      : 'Si aparece más de una, usa la de tu red Wi-Fi. Esa misma dirección se escribe en la app Android (TurnoYa) la primera vez que la abres.';
+  }
+
+  const respaldo = $('#respaldo-ayuda');
+  if (respaldo) {
+    if (enNube) {
+      respaldo.textContent =
+        'El archivo .sql incluye colaboradores, turnos y ajustes, y se puede restaurar en la base de datos en la nube.';
+    } else {
+      respaldo.innerHTML =
+        'El archivo incluye colaboradores, turnos y ajustes. Para restaurarlo, detén el servidor y reemplaza <code>data/tienda.db</code> por el archivo descargado.';
+    }
+  }
+
+  const enlaces = enNube && !direcciones.length ? [window.location.origin] : direcciones;
+  if (!enlaces.length) {
     lista.innerHTML =
       '<li class="muted small">No se detectó una dirección de red. Verifica que esta computadora esté conectada al Wi-Fi o a la red local.</li>';
     return;
   }
 
-  lista.innerHTML = direcciones
+  lista.innerHTML = enlaces
     .map(
       (url) => `
         <li class="lan-item">
@@ -1279,7 +1313,7 @@ function renderInfoAjustes() {
   const servidor =
     (Array.isArray(info.direcciones) && info.direcciones[0]) || window.location.origin;
   const filas = [
-    ['Versión', info.version || '1.1.0'],
+    ['Versión', info.version || '1.2.0'],
     ['Servidor', servidor],
     ['Puerto', info.puerto || window.location.port || '3000'],
     ['Base de datos', info.base_datos || 'data/tienda.db'],

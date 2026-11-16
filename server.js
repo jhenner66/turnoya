@@ -1,7 +1,16 @@
 const path = require('node:path');
 const os = require('node:os');
 const express = require('express');
-const { db, dataDir } = require('./db');
+const {
+  dataDir,
+  esRemota,
+  uno,
+  todos,
+  ejecutar,
+  lote,
+  preparar,
+  cerrar
+} = require('./db');
 const paquete = require('./package.json');
 
 const app = express();
@@ -11,7 +20,7 @@ const VERSION = paquete.version || '1.0.0';
 
 app.disable('x-powered-by');
 
-// Cabeceras básicas de seguridad para un uso interno en la red local.
+// Cabeceras básicas de seguridad.
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -27,13 +36,23 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use(express.json({ limit: '1mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// La base de datos se prepara una sola vez (importante en modo servidor sin estado).
+app.use('/api', async (req, res, next) => {
+  try {
+    await preparar();
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
 });
-
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
@@ -46,9 +65,9 @@ class HttpError extends Error {
   }
 }
 
-const ruta = (fn) => (req, res, next) => {
+const ruta = (fn) => async (req, res, next) => {
   try {
-    fn(req, res, next);
+    await fn(req, res, next);
   } catch (error) {
     next(error);
   }
@@ -113,22 +132,23 @@ function minutosEntre(desdeISO, hastaISO) {
   return Math.max(0, (hasta - desde) / 60000);
 }
 
-function leerConfig() {
-  const filas = db.prepare('SELECT clave, valor FROM configuracion').all();
+async function leerConfig() {
+  const filas = await todos('SELECT clave, valor FROM configuracion');
   const config = {};
   for (const fila of filas) config[fila.clave] = fila.valor;
   return config;
 }
 
-function guardarConfig(clave, valor) {
-  db.prepare(
+async function guardarConfig(clave, valor) {
+  await ejecutar(
     `INSERT INTO configuracion (clave, valor) VALUES (?, ?)
-     ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`
-  ).run(clave, String(valor));
+     ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor`,
+    [clave, String(valor)]
+  );
 }
 
-function umbralDiario() {
-  const valor = Number(leerConfig().jornada_horas);
+async function umbralDiario() {
+  const valor = Number((await leerConfig()).jornada_horas);
   return Number.isFinite(valor) && valor > 0 && valor <= 24 ? valor : 8;
 }
 
@@ -177,26 +197,23 @@ const SELECT_TURNOS = `
   JOIN colaboradores c ON c.id = t.colaborador_id
 `;
 
-function obtenerTurno(id) {
-  return db
-    .prepare(`${SELECT_TURNOS} WHERE t.id = ?`)
-    .get(Number(id));
+async function obtenerTurno(id) {
+  return uno(`${SELECT_TURNOS} WHERE t.id = ?`, [Number(id)]);
 }
 
-function exigirColaborador(id) {
-  const colaborador = db
-    .prepare('SELECT * FROM colaboradores WHERE id = ?')
-    .get(Number(id));
+async function exigirColaborador(id) {
+  const colaborador = await uno('SELECT * FROM colaboradores WHERE id = ?', [
+    Number(id)
+  ]);
   if (!colaborador) throw new HttpError(404, 'El colaborador no existe.');
   return colaborador;
 }
 
-function buscarSolape(colaboradorId, entradaISO, salidaISO, excluirId = null) {
-  const filas = db
-    .prepare(
-      'SELECT id, entrada, salida FROM turnos WHERE colaborador_id = ? AND id != ?'
-    )
-    .all(Number(colaboradorId), Number(excluirId) || -1);
+async function buscarSolape(colaboradorId, entradaISO, salidaISO, excluirId = null) {
+  const filas = await todos(
+    'SELECT id, entrada, salida FROM turnos WHERE colaborador_id = ? AND id != ?',
+    [Number(colaboradorId), Number(excluirId) || -1]
+  );
 
   const inicio = leerFechaHora(entradaISO);
   const fin = salidaISO ? leerFechaHora(salidaISO) : null;
@@ -253,75 +270,77 @@ function leerRango(req) {
 
 app.get(
   '/api/colaboradores',
-  ruta((req, res) => {
-    const filas = db
-      .prepare(
-        'SELECT * FROM colaboradores ORDER BY activo DESC, nombre COLLATE NOCASE ASC'
-      )
-      .all();
+  ruta(async (req, res) => {
+    const filas = await todos(
+      'SELECT * FROM colaboradores ORDER BY activo DESC, nombre COLLATE NOCASE ASC'
+    );
     res.json(filas.map(mapearColaborador));
   })
 );
 
 app.post(
   '/api/colaboradores',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const nombre = texto(req.body.nombre, 80);
     if (!nombre) throw new HttpError(400, 'El nombre es obligatorio.');
 
-    const info = db
-      .prepare(
-        `INSERT INTO colaboradores (nombre, puesto, email, telefono, activo)
-         VALUES (?, ?, ?, ?, ?)`
-      )
-      .run(
+    const info = await ejecutar(
+      `INSERT INTO colaboradores (nombre, puesto, email, telefono, activo)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
         nombre,
         texto(req.body.puesto, 80),
         texto(req.body.email, 120),
         texto(req.body.telefono, 40),
         req.body.activo === false ? 0 : 1
-      );
+      ]
+    );
 
-    const fila = db
-      .prepare('SELECT * FROM colaboradores WHERE id = ?')
-      .get(Number(info.lastInsertRowid));
+    const fila = await uno('SELECT * FROM colaboradores WHERE id = ?', [
+      info.lastInsertRowid
+    ]);
     res.status(201).json(mapearColaborador(fila));
   })
 );
 
 app.put(
   '/api/colaboradores/:id',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const id = Number(req.params.id);
-    exigirColaborador(id);
+    await exigirColaborador(id);
 
     const nombre = texto(req.body.nombre, 80);
     if (!nombre) throw new HttpError(400, 'El nombre es obligatorio.');
 
-    db.prepare(
+    await ejecutar(
       `UPDATE colaboradores
        SET nombre = ?, puesto = ?, email = ?, telefono = ?, activo = ?
-       WHERE id = ?`
-    ).run(
-      nombre,
-      texto(req.body.puesto, 80),
-      texto(req.body.email, 120),
-      texto(req.body.telefono, 40),
-      req.body.activo === false ? 0 : 1,
-      id
+       WHERE id = ?`,
+      [
+        nombre,
+        texto(req.body.puesto, 80),
+        texto(req.body.email, 120),
+        texto(req.body.telefono, 40),
+        req.body.activo === false ? 0 : 1,
+        id
+      ]
     );
 
-    const fila = db.prepare('SELECT * FROM colaboradores WHERE id = ?').get(id);
+    const fila = await uno('SELECT * FROM colaboradores WHERE id = ?', [id]);
     res.json(mapearColaborador(fila));
   })
 );
 
 app.delete(
   '/api/colaboradores/:id',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const id = Number(req.params.id);
-    exigirColaborador(id);
-    db.prepare('DELETE FROM colaboradores WHERE id = ?').run(id);
+    await exigirColaborador(id);
+    // Borrado explícito de sus turnos para no depender de PRAGMA foreign_keys.
+    await lote([
+      { sql: 'DELETE FROM turnos WHERE colaborador_id = ?', args: [id] },
+      { sql: 'DELETE FROM colaboradores WHERE id = ?', args: [id] }
+    ]);
     res.json({ ok: true });
   })
 );
@@ -332,18 +351,15 @@ app.delete(
 
 app.get(
   '/api/estado',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const ahora = aISOlocal();
     const hoy = ahora.slice(0, 10);
 
-    const activos = db
-      .prepare(`${SELECT_TURNOS} WHERE t.salida IS NULL ORDER BY t.entrada ASC`)
-      .all()
-      .map(mapearTurno);
+    const activos = (
+      await todos(`${SELECT_TURNOS} WHERE t.salida IS NULL ORDER BY t.entrada ASC`)
+    ).map(mapearTurno);
 
-    const turnosHoy = db
-      .prepare('SELECT * FROM turnos WHERE fecha = ?')
-      .all(hoy);
+    const turnosHoy = await todos('SELECT * FROM turnos WHERE fecha = ?', [hoy]);
 
     let horasHoy = 0;
     for (const turno of turnosHoy) {
@@ -382,7 +398,7 @@ app.get(
 
 app.get(
   '/api/turnos',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const condiciones = [];
     const parametros = [];
 
@@ -403,9 +419,10 @@ app.get(
     }
 
     const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
-    const filas = db
-      .prepare(`${SELECT_TURNOS} ${where} ORDER BY t.entrada DESC LIMIT 1000`)
-      .all(...parametros);
+    const filas = await todos(
+      `${SELECT_TURNOS} ${where} ORDER BY t.entrada DESC LIMIT 1000`,
+      parametros
+    );
 
     res.json(filas.map(mapearTurno));
   })
@@ -413,70 +430,71 @@ app.get(
 
 app.post(
   '/api/turnos/entrada',
-  ruta((req, res) => {
-    const colaborador = exigirColaborador(req.body.colaborador_id);
+  ruta(async (req, res) => {
+    const colaborador = await exigirColaborador(req.body.colaborador_id);
     if (!colaborador.activo) {
       throw new HttpError(400, 'El colaborador está inactivo.');
     }
 
-    const abierto = db
-      .prepare('SELECT id FROM turnos WHERE colaborador_id = ? AND salida IS NULL')
-      .get(colaborador.id);
+    const abierto = await uno(
+      'SELECT id FROM turnos WHERE colaborador_id = ? AND salida IS NULL',
+      [colaborador.id]
+    );
     if (abierto) {
       throw new HttpError(409, 'Este colaborador ya tiene un turno abierto.');
     }
 
     const ahora = aISOlocal();
-    const info = db
-      .prepare(
-        'INSERT INTO turnos (colaborador_id, fecha, entrada, notas) VALUES (?, ?, ?, ?)'
-      )
-      .run(colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500));
+    const info = await ejecutar(
+      'INSERT INTO turnos (colaborador_id, fecha, entrada, notas) VALUES (?, ?, ?, ?)',
+      [colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500)]
+    );
 
-    res.status(201).json(mapearTurno(obtenerTurno(info.lastInsertRowid)));
+    res.status(201).json(mapearTurno(await obtenerTurno(info.lastInsertRowid)));
   })
 );
 
 app.post(
   '/api/turnos/:id/pausa/iniciar',
-  ruta((req, res) => {
-    const turno = obtenerTurno(req.params.id);
+  ruta(async (req, res) => {
+    const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (turno.salida) throw new HttpError(400, 'El turno ya está cerrado.');
     if (turno.pausa_inicio) {
       throw new HttpError(409, 'La pausa ya está iniciada.');
     }
 
-    db.prepare('UPDATE turnos SET pausa_inicio = ? WHERE id = ?').run(
+    await ejecutar('UPDATE turnos SET pausa_inicio = ? WHERE id = ?', [
       aISOlocal(),
       turno.id
-    );
-    res.json(mapearTurno(obtenerTurno(turno.id)));
+    ]);
+    res.json(mapearTurno(await obtenerTurno(turno.id)));
   })
 );
 
 app.post(
   '/api/turnos/:id/pausa/finalizar',
-  ruta((req, res) => {
-    const turno = obtenerTurno(req.params.id);
+  ruta(async (req, res) => {
+    const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (!turno.pausa_inicio) {
       throw new HttpError(409, 'No hay una pausa en curso.');
     }
 
     const minutos = minutosEntre(turno.pausa_inicio, aISOlocal());
-    db.prepare(
-      'UPDATE turnos SET pausa_inicio = NULL, pausa_minutos = pausa_minutos + ? WHERE id = ?'
-    ).run(minutos, turno.id);
+    await ejecutar(
+      'UPDATE turnos SET pausa_inicio = NULL, pausa_minutos = pausa_minutos + ? WHERE id = ?',
+      [minutos, turno.id]
+    );
 
-    res.json(mapearTurno(obtenerTurno(turno.id)));
+    res.json(mapearTurno(await obtenerTurno(turno.id)));
   })
 );
 
 app.post(
   '/api/turnos/:id/salida',
-  ruta((req, res) => {
-    const turno = obtenerTurno(req.params.id);
+  ruta(async (req, res) => {
+    const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (turno.salida) throw new HttpError(409, 'El turno ya está cerrado.');
 
@@ -486,20 +504,21 @@ app.post(
       pausaMinutos += minutosEntre(turno.pausa_inicio, ahora);
     }
 
-    db.prepare(
+    await ejecutar(
       `UPDATE turnos
        SET salida = ?, pausa_inicio = NULL, pausa_minutos = ?
-       WHERE id = ?`
-    ).run(ahora, redondear(pausaMinutos), turno.id);
+       WHERE id = ?`,
+      [ahora, redondear(pausaMinutos), turno.id]
+    );
 
-    res.json(mapearTurno(obtenerTurno(turno.id)));
+    res.json(mapearTurno(await obtenerTurno(turno.id)));
   })
 );
 
 app.post(
   '/api/turnos',
-  ruta((req, res) => {
-    const colaborador = exigirColaborador(req.body.colaborador_id);
+  ruta(async (req, res) => {
+    const colaborador = await exigirColaborador(req.body.colaborador_id);
 
     const entrada = normalizarFechaHora(req.body.entrada, 'hora de entrada');
     const salida = normalizarFechaHora(req.body.salida, 'hora de salida');
@@ -516,39 +535,40 @@ app.post(
       throw new HttpError(400, 'La pausa no puede durar más que el turno.');
     }
 
-    if (buscarSolape(colaborador.id, entrada, salida)) {
+    if (await buscarSolape(colaborador.id, entrada, salida)) {
       throw new HttpError(
         409,
         'El turno se cruza con otro turno de este colaborador.'
       );
     }
 
-    const info = db
-      .prepare(
-        `INSERT INTO turnos
-         (colaborador_id, fecha, entrada, salida, pausa_minutos, notas)
-         VALUES (?, ?, ?, ?, ?, ?)`
-      )
-      .run(
+    const info = await ejecutar(
+      `INSERT INTO turnos
+       (colaborador_id, fecha, entrada, salida, pausa_minutos, notas)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
         colaborador.id,
         entrada.slice(0, 10),
         entrada,
         salida,
         pausaMinutos,
         texto(req.body.notas, 500)
-      );
+      ]
+    );
 
-    res.status(201).json(mapearTurno(obtenerTurno(info.lastInsertRowid)));
+    res.status(201).json(mapearTurno(await obtenerTurno(info.lastInsertRowid)));
   })
 );
 
 app.put(
   '/api/turnos/:id',
-  ruta((req, res) => {
-    const turno = obtenerTurno(req.params.id);
+  ruta(async (req, res) => {
+    const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
 
-    const colaborador = exigirColaborador(req.body.colaborador_id ?? turno.colaborador_id);
+    const colaborador = await exigirColaborador(
+      req.body.colaborador_id ?? turno.colaborador_id
+    );
     const entrada = normalizarFechaHora(req.body.entrada, 'hora de entrada');
     const salida = req.body.salida
       ? normalizarFechaHora(req.body.salida, 'hora de salida')
@@ -575,39 +595,40 @@ app.put(
       throw new HttpError(400, 'La pausa no puede durar más que el turno.');
     }
 
-    if (buscarSolape(colaborador.id, entrada, salida, turno.id)) {
+    if (await buscarSolape(colaborador.id, entrada, salida, turno.id)) {
       throw new HttpError(
         409,
         'El turno se cruza con otro turno de este colaborador.'
       );
     }
 
-    db.prepare(
+    await ejecutar(
       `UPDATE turnos
        SET colaborador_id = ?, fecha = ?, entrada = ?, salida = ?,
            pausa_inicio = ?, pausa_minutos = ?, notas = ?
-       WHERE id = ?`
-    ).run(
-      colaborador.id,
-      entrada.slice(0, 10),
-      entrada,
-      salida,
-      pausaInicio,
-      redondear(pausaMinutos),
-      texto(req.body.notas, 500),
-      turno.id
+       WHERE id = ?`,
+      [
+        colaborador.id,
+        entrada.slice(0, 10),
+        entrada,
+        salida,
+        pausaInicio,
+        redondear(pausaMinutos),
+        texto(req.body.notas, 500),
+        turno.id
+      ]
     );
 
-    res.json(mapearTurno(obtenerTurno(turno.id)));
+    res.json(mapearTurno(await obtenerTurno(turno.id)));
   })
 );
 
 app.delete(
   '/api/turnos/:id',
-  ruta((req, res) => {
-    const turno = obtenerTurno(req.params.id);
+  ruta(async (req, res) => {
+    const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
-    db.prepare('DELETE FROM turnos WHERE id = ?').run(turno.id);
+    await ejecutar('DELETE FROM turnos WHERE id = ?', [turno.id]);
     res.json({ ok: true });
   })
 );
@@ -616,7 +637,7 @@ app.delete(
 /* Reportes                                                            */
 /* ------------------------------------------------------------------ */
 
-function calcularReporte({ desde, hasta, colaboradorId }) {
+async function calcularReporte({ desde, hasta, colaboradorId }) {
   const condiciones = ['t.salida IS NOT NULL'];
   const parametros = [];
 
@@ -633,14 +654,13 @@ function calcularReporte({ desde, hasta, colaboradorId }) {
     parametros.push(colaboradorId);
   }
 
-  const filas = db
-    .prepare(
-      `${SELECT_TURNOS} WHERE ${condiciones.join(' AND ')}
-       ORDER BY t.fecha ASC, t.entrada ASC`
-    )
-    .all(...parametros);
+  const filas = await todos(
+    `${SELECT_TURNOS} WHERE ${condiciones.join(' AND ')}
+     ORDER BY t.fecha ASC, t.entrada ASC`,
+    parametros
+  );
 
-  const umbral = umbralDiario();
+  const umbral = await umbralDiario();
   const detalle = filas.map(mapearTurno);
 
   // Horas extra por colaborador y día (no por turno suelto).
@@ -751,7 +771,7 @@ function calcularReporte({ desde, hasta, colaboradorId }) {
 
 app.get(
   '/api/reportes',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const hoy = hoyISO();
     const rango = leerRango(req);
     const desde = rango.desde || `${hoy.slice(0, 8)}01`;
@@ -759,7 +779,7 @@ app.get(
     const colaboradorId = Number(req.query.colaborador_id);
 
     res.json(
-      calcularReporte({
+      await calcularReporte({
         desde,
         hasta,
         colaboradorId:
@@ -784,14 +804,14 @@ function numeroCSV(valor) {
 
 app.get(
   '/api/reportes/csv',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     const hoy = hoyISO();
     const rango = leerRango(req);
     const desde = rango.desde || `${hoy.slice(0, 8)}01`;
     const hasta = rango.hasta || hoy;
     const colaboradorId = Number(req.query.colaborador_id);
 
-    const reporte = calcularReporte({
+    const reporte = await calcularReporte({
       desde,
       hasta,
       colaboradorId:
@@ -860,38 +880,96 @@ app.get(
 
 app.get(
   '/api/config',
-  ruta((req, res) => {
-    res.json(leerConfig());
+  ruta(async (req, res) => {
+    res.json(await leerConfig());
   })
 );
 
 app.get(
   '/api/info',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     res.json({
-      nombre_tienda: leerConfig().nombre_tienda,
+      nombre_tienda: (await leerConfig()).nombre_tienda,
       version: VERSION,
       puerto: PORT,
       node: process.version,
-      base_datos: 'data/tienda.db',
+      modo: esRemota ? 'nube' : 'local',
+      base_datos: esRemota ? 'Turso (nube)' : 'data/tienda.db',
       hora_servidor: aISOlocal(),
-      direcciones: direccionesLocales().map((ip) => `http://${ip}:${PORT}`)
+      direcciones: esRemota
+        ? []
+        : direccionesLocales().map((ip) => `http://${ip}:${PORT}`)
     });
   })
 );
 
 app.get(
   '/api/salud',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     res.json({ ok: true, ahora: aISOlocal(), version: VERSION });
   })
 );
 
+function valorSQL(valor) {
+  if (valor === null || valor === undefined) return 'NULL';
+  if (typeof valor === 'number' || typeof valor === 'bigint') return String(valor);
+  if (valor instanceof Uint8Array) {
+    return `X'${Buffer.from(valor).toString('hex')}'`;
+  }
+  return `'${String(valor).replaceAll("'", "''")}'`;
+}
+
+// En la nube no hay archivo SQLite: se genera un volcado SQL restaurable.
+async function volcarSQL() {
+  const objetos = await todos(
+    `SELECT type, name, sql FROM sqlite_master
+     WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'
+     ORDER BY CASE type WHEN 'table' THEN 0 ELSE 1 END, name`
+  );
+
+  const lineas = [
+    '-- Respaldo de TurnoYa',
+    `-- Generado: ${aISOlocal()}`,
+    'BEGIN TRANSACTION;'
+  ];
+
+  for (const objeto of objetos) {
+    lineas.push(`${objeto.sql};`);
+    if (objeto.type !== 'table') continue;
+
+    const filas = await todos(`SELECT * FROM "${objeto.name}"`);
+    for (const fila of filas) {
+      const columnas = Object.keys(fila);
+      lineas.push(
+        `INSERT INTO "${objeto.name}" (${columnas
+          .map((c) => `"${c}"`)
+          .join(', ')}) VALUES (${columnas
+          .map((c) => valorSQL(fila[c]))
+          .join(', ')});`
+      );
+    }
+  }
+
+  lineas.push('COMMIT;');
+  return lineas.join('\n');
+}
+
 app.get(
   '/api/respaldo',
-  ruta((req, res, next) => {
-    // Vuelca el WAL al archivo principal antes de enviarlo.
-    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  ruta(async (req, res, next) => {
+    if (esRemota) {
+      const sql = await volcarSQL();
+      res.setHeader('Content-Type', 'application/sql; charset=utf-8');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="turnoya-respaldo-${hoyISO()}.sql"`
+      );
+      res.send(sql);
+      return;
+    }
+
+    // En local se envía el archivo SQLite completo.
+    await ejecutar('PRAGMA wal_checkpoint(TRUNCATE)');
     const archivo = path.join(dataDir, 'tienda.db');
     res.download(archivo, `turnoya-respaldo-${hoyISO()}.db`, (error) => {
       if (error && !res.headersSent) next(error);
@@ -901,11 +979,11 @@ app.get(
 
 app.put(
   '/api/config',
-  ruta((req, res) => {
+  ruta(async (req, res) => {
     if (req.body.nombre_tienda !== undefined) {
       const nombre = texto(req.body.nombre_tienda, 60);
       if (!nombre) throw new HttpError(400, 'El nombre de la tienda es obligatorio.');
-      guardarConfig('nombre_tienda', nombre);
+      await guardarConfig('nombre_tienda', nombre);
     }
 
     if (req.body.jornada_horas !== undefined) {
@@ -913,10 +991,10 @@ app.put(
       if (!Number.isFinite(horas) || horas < 1 || horas > 24) {
         throw new HttpError(400, 'La jornada diaria debe estar entre 1 y 24 horas.');
       }
-      guardarConfig('jornada_horas', redondear(horas));
+      await guardarConfig('jornada_horas', redondear(horas));
     }
 
-    res.json(leerConfig());
+    res.json(await leerConfig());
   })
 );
 
@@ -957,34 +1035,50 @@ function direccionesLocales() {
   return direcciones;
 }
 
-const servidor = app.listen(PORT, HOST, () => {
-  console.log('');
-  console.log(`  TurnoYa ${VERSION} - Control de horas`);
-  console.log('  ----------------------------------------');
-  console.log(`  Local:  http://localhost:${PORT}`);
-  for (const direccion of direccionesLocales()) {
-    console.log(`  Red:    http://${direccion}:${PORT}`);
+async function arrancar() {
+  try {
+    await preparar();
+  } catch (error) {
+    console.error('No se pudo preparar la base de datos:', error.message);
+    process.exit(1);
   }
-  console.log('');
-  console.log('  Presiona Ctrl+C para detener el servidor.');
-  console.log('');
-});
 
-let cerrando = false;
-function cerrarServidor(senal) {
-  if (cerrando) return;
-  cerrando = true;
-  console.log(`\n  Cerrando TurnoYa (${senal})…`);
-  servidor.close(() => {
-    try {
-      db.close();
-    } catch (error) {
-      console.error('No se pudo cerrar la base de datos:', error.message);
+  const servidor = app.listen(PORT, HOST, () => {
+    console.log('');
+    console.log(`  TurnoYa ${VERSION} - Control de horas`);
+    console.log('  ----------------------------------------');
+    if (esRemota) {
+      console.log('  Base de datos: Turso (nube)');
+    } else {
+      console.log(`  Base de datos: ${path.join('data', 'tienda.db')}`);
+      console.log(`  Local:  http://localhost:${PORT}`);
+      for (const direccion of direccionesLocales()) {
+        console.log(`  Red:    http://${direccion}:${PORT}`);
+      }
     }
-    process.exit(0);
+    console.log('');
+    console.log('  Presiona Ctrl+C para detener el servidor.');
+    console.log('');
   });
-  setTimeout(() => process.exit(1), 5000).unref();
+
+  let cerrando = false;
+  function cerrarServidor(senal) {
+    if (cerrando) return;
+    cerrando = true;
+    console.log(`\n  Cerrando TurnoYa (${senal})…`);
+    servidor.close(async () => {
+      await cerrar();
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 5000).unref();
+  }
+
+  process.on('SIGINT', () => cerrarServidor('SIGINT'));
+  process.on('SIGTERM', () => cerrarServidor('SIGTERM'));
 }
 
-process.on('SIGINT', () => cerrarServidor('SIGINT'));
-process.on('SIGTERM', () => cerrarServidor('SIGTERM'));
+if (require.main === module) {
+  arrancar();
+}
+
+module.exports = app;
