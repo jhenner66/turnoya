@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TurnoYa</string>
+    <string name="setup_title">TurnoYa</string>
+    <string name="setup_subtitle">Control de horas de la tienda</string>
+    <string name="setup_label">Dirección del servidor</string>
+    <string name="setup_hint">http://192.168.1.50:3000</string>
+    <string name="setup_help">Escribe la dirección que aparece en la computadora, en Ajustes → Acceso desde el celular. El teléfono debe estar en el mismo Wi-Fi.</string>
+    <string name="setup_button">Conectar</string>
+    <string name="menu_reload">Recargar</string>
+    <string name="menu_server">Cambiar servidor</string>
+    <string name="menu_browser">Abrir en el navegador</string>
+    <string name="error_url">Escribe una dirección válida, por ejemplo http://192.168.1.50:3000</string>
+    <string name="error_connect">No se pudo conectar con el servidor. Revisa que la computadora esté encendida, que el teléfono esté en el mismo Wi-Fi y que la dirección sea correcta.</string>
+    <string name="download_started">Descargando el reporte…</string>
+    <string name="download_error">No se pudo iniciar la descarga.</string>
+    <string name="download_permission">Permite el almacenamiento para guardar el reporte.</string>
+    <string name="app_subtitle">Control de horas de la tienda</string>
+    <string name="error_title">No se pudo cargar</string>
+    <string name="error_retry">Reintentar</string>
+    <string name="error_change_server">Cambiar servidor</string>
+    <string name="error_network">Sin conexión de red. Revisa que el teléfono esté conectado al Wi-Fi de la tienda.</string>
+    <string name="error_http">El servidor respondió con un error %1$d. Revisa que TurnoYa esté funcionando en la computadora.</string>
+    <string name="version_label">Versión %1$s</string>
+    <string name="external_link_error">No se pudo abrir el enlace.</string>
+    <string name="menu_about">Acerca de</string>
+    <string name="acerca_titulo">Acerca de TurnoYa</string>
+    <string name="acerca_mensaje">TurnoYa %1$s\n\nServidor: %2$s\n\nRegistra entradas, pausas y salidas del personal de la tienda desde el teléfono, dentro de la misma red local.</string>
+    <string name="acerca_sin_servidor">Sin configurar</string>
+</resources>

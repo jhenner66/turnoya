@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/accion_recargar"
+        android:title="@string/menu_reload" />
+    <item
+        android:id="@+id/accion_servidor"
+        android:title="@string/menu_server" />
+    <item
+        android:id="@+id/accion_navegador"
+        android:title="@string/menu_browser" />
+    <item
+        android:id="@+id/accion_acerca"
+        android:title="@string/menu_about" />
+</menu>
