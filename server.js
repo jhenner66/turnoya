@@ -1,3 +1,9 @@
+// Zona horaria configurable: en Vercel `TZ` es un nombre reservado, por eso
+// se usa TURNOYA_TZ (por ejemplo America/Caracas).
+if (process.env.TURNOYA_TZ) {
+  process.env.TZ = process.env.TURNOYA_TZ;
+}
+
 const path = require('node:path');
 const os = require('node:os');
 const express = require('express');

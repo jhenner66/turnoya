@@ -43,9 +43,9 @@ GitHub Pages **no puede** ejecutar esta app: solo sirve archivos estáticos y no
 | --- | --- | --- |
 | `TURSO_DATABASE_URL` | `libsql://turnoya-....turso.io` | Sí |
 | `TURSO_AUTH_TOKEN` | token generado en Turso | Sí |
-| `TZ` | `America/Caracas` (o tu zona horaria) | Recomendada |
+| `TURNOYA_TZ` | `America/Caracas` (o tu zona horaria) | Recomendada |
 
-`TZ` es importante: en la nube el servidor usa UTC por defecto y las horas quedarían corridas.
+`TURNOYA_TZ` es importante: en la nube el servidor usa UTC por defecto y las horas quedarían corridas. Se llama así porque Vercel reserva el nombre `TZ`.
 
 4. Pulsa **Deploy**. Vercel te da una dirección `https://turnoya-....vercel.app` con HTTPS.
 
@@ -64,7 +64,7 @@ En **TurnoYa**, abre el menú **Cambiar servidor** y escribe la dirección de Ve
 | `PORT` | Puerto del servidor (por defecto `3000`). En Vercel lo asigna la plataforma. |
 | `HOST` | Interfaz de escucha (por defecto `0.0.0.0`). |
 | `DATA_DIR` | Carpeta del archivo SQLite en modo local (por defecto `data/`). |
-| `TZ` | Zona horaria del servidor. |
+| `TURNOYA_TZ` | Zona horaria del servidor (por ejemplo `America/Caracas`). |
 
 ## App para Android (APK)
 
