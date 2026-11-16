@@ -44,8 +44,10 @@ function escapar(valor) {
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
+let servidorHoy = null;
+
 function hoyISO() {
-  return fechaLocalISO(new Date());
+  return servidorHoy || fechaLocalISO(new Date());
 }
 
 function fechaLocalISO(fecha) {
@@ -53,8 +55,10 @@ function fechaLocalISO(fecha) {
 }
 
 function inicioDeMes() {
-  const hoy = new Date();
-  return `${hoy.getFullYear()}-${pad2(hoy.getMonth() + 1)}-01`;
+  const base = servidorHoy
+    ? new Date(`${servidorHoy}T12:00:00`)
+    : new Date();
+  return `${base.getFullYear()}-${pad2(base.getMonth() + 1)}-01`;
 }
 
 function parseLocal(iso) {
@@ -775,8 +779,8 @@ function renderRegistros() {
 
       return `
         <tr>
-          <td class="cell-mono">${fechaCorta(turno.fecha)}</td>
-          <td>
+          <td class="cell-mono" data-label="Fecha">${fechaCorta(turno.fecha)}</td>
+          <td data-label="Colaborador">
             <div class="cell-person">
               <div class="avatar">${escapar(iniciales(turno.colaborador_nombre))}</div>
               <div>
@@ -785,12 +789,12 @@ function renderRegistros() {
               </div>
             </div>
           </td>
-          <td class="cell-mono">${horaCorta(turno.entrada)}</td>
-          <td class="cell-mono">${turno.salida ? horaCorta(turno.salida) : '—'}</td>
-          <td class="cell-mono">${turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—'}</td>
-          <td class="cell-mono">${turno.horas !== null ? formatoHoras(turno.horas) : 'En curso'}</td>
-          <td>${insignia}</td>
-          <td>
+          <td class="cell-mono" data-label="Entrada">${horaCorta(turno.entrada)}</td>
+          <td class="cell-mono" data-label="Salida">${turno.salida ? horaCorta(turno.salida) : '—'}</td>
+          <td class="cell-mono" data-label="Pausa">${turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—'}</td>
+          <td class="cell-mono" data-label="Horas">${turno.horas !== null ? formatoHoras(turno.horas) : 'En curso'}</td>
+          <td data-label="Estado">${insignia}</td>
+          <td data-label="Acciones">
             <div class="row-actions">
               ${accionesTurno}
               <button class="btn ghost small" type="button" data-accion="editar-registro" data-id="${turno.id}">
@@ -1398,6 +1402,26 @@ async function cargarTodo() {
   state.info = info;
   state.estado = estado;
 
+  if (info && info.hora_servidor) {
+    servidorHoy = String(info.hora_servidor).slice(0, 10);
+    const base = new Date(`${servidorHoy}T12:00:00`);
+    const inicio = `${base.getFullYear()}-${pad2(base.getMonth() + 1)}-01`;
+    for (const clave of ['registros', 'reportes']) {
+      state.filtros[clave].desde = inicio;
+      state.filtros[clave].hasta = servidorHoy;
+    }
+    const pares = [
+      ['#filtro-reg-desde', 'registros'],
+      ['#filtro-reg-hasta', 'registros'],
+      ['#filtro-rep-desde', 'reportes'],
+      ['#filtro-rep-hasta', 'reportes']
+    ];
+    for (const [selector, clave] of pares) {
+      const campo = $(selector);
+      if (campo) campo.value = state.filtros[clave][selector.includes('desde') ? 'desde' : 'hasta'];
+    }
+  }
+
   aplicarConfig();
   renderAccesoCelular(info);
   renderInfoAjustes();
@@ -1509,7 +1533,7 @@ function conectarEventos() {
         toast('Salida registrada.');
       }
       await refrescarEstado(true);
-      if (state.vista === 'registros') cargarRegistros(true);
+      await cargarRegistros(true);
       if (state.vista === 'reportes') cargarReporte(true);
     } catch (error) {
       toast(error.message, 'error');

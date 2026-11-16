@@ -1673,3 +1673,83 @@ textarea {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* ---------------- Registros como tarjetas en móvil ---------------- */
+
+@media (max-width: 720px) {
+  #tabla-registros,
+  #tabla-registros thead,
+  #tabla-registros tbody,
+  #tabla-registros tr,
+  #tabla-registros th,
+  #tabla-registros td {
+    display: block;
+    width: 100%;
+  }
+
+  #tabla-registros thead {
+    display: none;
+  }
+
+  #tabla-registros tbody tr {
+    margin-bottom: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  #tabla-registros td {
+    border: 0;
+    padding: 6px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: right;
+  }
+
+  #tabla-registros td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    flex-shrink: 0;
+    text-align: left;
+  }
+
+  #tabla-registros td[data-label="Colaborador"] {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  #tabla-registros td[data-label="Colaborador"]::before {
+    display: none;
+  }
+
+  #tabla-registros td[data-label="Acciones"] {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    border-top: 1px solid #f1f5f9;
+    margin-top: 4px;
+    padding-top: 10px;
+  }
+
+  #tabla-registros td[data-label="Acciones"]::before {
+    display: none;
+  }
+
+  #tabla-registros .row-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+  }
+
+  #tabla-registros .cell-person {
+    min-width: 0;
+  }
+}
