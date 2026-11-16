@@ -86,7 +86,16 @@ const ruta = (fn) => async (req, res, next) => {
   }
 };
 
-const pad = (n) => String(n).padStart(2, '0');
+function fechaCorta(iso) {
+  if (!iso) return '—';
+  const [anio, mes, dia] = String(iso).slice(0, 10).split('-');
+  return `${dia}/${mes}/${anio}`;
+}
+
+function horaCorta(iso) {
+  if (!iso) return '—';
+  return String(iso).slice(11, 16);
+}
 
 function aISOlocal(fecha = new Date()) {
   const opciones = {
@@ -907,9 +916,288 @@ app.get(
   })
 );
 
+const exceljs = require('exceljs');
+
 /* ------------------------------------------------------------------ */
-/* Configuración                                                       */
+/* Exportación Excel                                                   */
 /* ------------------------------------------------------------------ */
+
+app.get(
+  '/api/reportes/excel',
+  ruta(async (req, res) => {
+    const hoy = hoyISO();
+    const rango = leerRango(req);
+    const desde = rango.desde || `${hoy.slice(0, 8)}01`;
+    const hasta = rango.hasta || hoy;
+    const colaboradorId = Number(req.query.colaborador_id);
+
+    const reporte = await calcularReporte({
+      desde,
+      hasta,
+      colaboradorId:
+        Number.isInteger(colaboradorId) && colaboradorId > 0
+          ? colaboradorId
+          : null
+    });
+
+    const config = await leerConfig();
+    const nombreTienda = config.nombre_tienda || 'Mi Tienda';
+
+    const libro = new exceljs.Workbook();
+    libro.creator = 'TurnoYa';
+    libro.created = new Date();
+    libro.properties.title = `Reporte de horas ${desde} a ${hasta}`;
+
+    const colorEncabezado = '1F3864';
+    const colorSub = 'D9E2F3';
+    const colorTotales = 'FFF2CC';
+
+    /* ---------------- Hoja: Resumen ---------------- */
+    const hojaResumen = libro.addWorksheet('Resumen', {
+      properties: { tabColor: { argb: '1F3864' } }
+    });
+
+    hojaResumen.columns = [
+      { width: 34 },
+      { width: 18 },
+      { width: 14 },
+      { width: 14 },
+      { width: 14 },
+      { width: 14 }
+    ];
+
+    hojaResumen.mergeCells('A1:F1');
+    const titulo = hojaResumen.getCell('A1');
+    titulo.value = `Control de Horas · ${nombreTienda}`;
+    titulo.font = { size: 16, bold: true, color: { argb: 'FFFFFF' } };
+    titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorEncabezado } };
+    titulo.alignment = { vertical: 'middle', horizontal: 'center' };
+    hojaResumen.getRow(1).height = 26;
+
+    hojaResumen.mergeCells('A2:F2');
+    const subtitulo = hojaResumen.getCell('A2');
+    subtitulo.value = `Reporte del ${fechaCorta(desde)} al ${fechaCorta(hasta)} · Jornada diaria de ${reporte.umbral} h`;
+    subtitulo.font = { size: 11, italic: true, color: { argb: '404040' } };
+    subtitulo.alignment = { vertical: 'middle', horizontal: 'center' };
+    hojaResumen.getRow(2).height = 18;
+
+    hojaResumen.mergeCells('A3:F3');
+    const generado = hojaResumen.getCell('A3');
+    generado.value = `Generado el ${fechaCorta(hoyISO())} a las ${horaCorta(aISOlocal())} · TurnoYa ${VERSION}`;
+    generado.font = { size: 9, color: { argb: '808080' } };
+    generado.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    let fila = 5;
+    hojaResumen.getCell(`A${fila}`).value = 'TOTALES DEL PERIODO';
+    hojaResumen.getCell(`A${fila}`).font = { bold: true, size: 12, color: { argb: colorEncabezado } };
+    fila += 1;
+
+    const totales = [
+      ['Horas trabajadas', reporte.totales.horas, 'h'],
+      ['Horas extra', reporte.totales.extra, 'h'],
+      ['Turnos completados', reporte.totales.turnos, 'turnos'],
+      ['Colaboradores', reporte.totales.colaboradores, 'personas'],
+      ['Días con actividad', reporte.totales.dias, 'días'],
+      ['Pausas (minutos)', reporte.totales.pausa_minutos, 'min']
+    ];
+    for (const [etiqueta, valor, unidad] of totales) {
+      hojaResumen.getCell(`A${fila}`).value = etiqueta;
+      hojaResumen.getCell(`A${fila}`).font = { bold: true };
+      hojaResumen.getCell(`B${fila}`).value = valor;
+      hojaResumen.getCell(`B${fila}`).alignment = { horizontal: 'center' };
+      if (unidad === 'h' || unidad === 'min') {
+        hojaResumen.getCell(`B${fila}`).numFmt = '0.00';
+      }
+      hojaResumen.getCell(`C${fila}`).value = unidad;
+      hojaResumen.getCell(`C${fila}`).font = { size: 9, color: { argb: '808080' } };
+      fila += 1;
+    }
+
+    fila += 1;
+    hojaResumen.getCell(`A${fila}`).value = 'RESUMEN POR COLABORADOR';
+    hojaResumen.getCell(`A${fila}`).font = { bold: true, size: 12, color: { argb: colorEncabezado } };
+    fila += 1;
+
+    const encabezadoColabs = [
+      'Colaborador', 'Puesto', 'Días', 'Turnos', 'Pausas (min)', 'Horas', 'Horas extra'
+    ];
+    encabezadoColabs.forEach((texto, indice) => {
+      const celda = hojaResumen.getCell(fila, indice + 1);
+      celda.value = texto;
+      celda.font = { bold: true, color: { argb: 'FFFFFF' } };
+      celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorEncabezado } };
+      celda.alignment = { horizontal: 'center', vertical: 'middle' };
+      celda.border = {
+        top: { style: 'thin' }, bottom: { style: 'thin' },
+        left: { style: 'thin' }, right: { style: 'thin' }
+      };
+    });
+    hojaResumen.getRow(fila).height = 18;
+    fila += 1;
+
+    const inicioColabs = fila;
+    for (const colaborador of reporte.por_colaborador) {
+      hojaResumen.getCell(fila, 1).value = colaborador.colaborador_nombre;
+      hojaResumen.getCell(fila, 2).value = colaborador.colaborador_puesto || '—';
+      hojaResumen.getCell(fila, 3).value = colaborador.dias;
+      hojaResumen.getCell(fila, 4).value = colaborador.turnos;
+      hojaResumen.getCell(fila, 5).value = redondear(colaborador.pausa_minutos);
+      hojaResumen.getCell(fila, 6).value = redondear(colaborador.horas);
+      hojaResumen.getCell(fila, 7).value = redondear(colaborador.extra);
+      for (let i = 1; i <= 7; i++) {
+        const celda = hojaResumen.getCell(fila, i);
+        celda.border = {
+          top: { style: 'thin', color: { argb: 'D9D9D9' } },
+          bottom: { style: 'thin', color: { argb: 'D9D9D9' } },
+          left: { style: 'thin', color: { argb: 'D9D9D9' } },
+          right: { style: 'thin', color: { argb: 'D9D9D9' } }
+        };
+        if (i >= 3) celda.alignment = { horizontal: 'center' };
+        if (i >= 5) celda.numFmt = '0.00';
+      }
+      fila += 1;
+    }
+
+    // Fila de totales
+    const totalesColabs = [
+      'TOTALES', '', reporte.totales.dias, reporte.totales.turnos,
+      redondear(reporte.totales.pausa_minutos), redondear(reporte.totales.horas),
+      redondear(reporte.totales.extra)
+    ];
+    totalesColabs.forEach((valor, indice) => {
+      const celda = hojaResumen.getCell(fila, indice + 1);
+      celda.value = valor;
+      celda.font = { bold: true };
+      celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorTotales } };
+      celda.border = {
+        top: { style: 'thin' }, bottom: { style: 'thin' },
+        left: { style: 'thin' }, right: { style: 'thin' }
+      };
+      if (indice >= 2) celda.alignment = { horizontal: 'center' };
+      if (indice >= 4) celda.numFmt = '0.00';
+    });
+    fila += 2;
+
+    /* ---------------- Hoja: Registros ---------------- */
+    const hojaRegistros = libro.addWorksheet('Registros', {
+      properties: { tabColor: { argb: '548235' } }
+    });
+
+    hojaRegistros.columns = [
+      { header: 'Fecha', key: 'fecha', width: 12 },
+      { header: 'Colaborador', key: 'colaborador', width: 26 },
+      { header: 'Puesto', key: 'puesto', width: 16 },
+      { header: 'Entrada', key: 'entrada', width: 10 },
+      { header: 'Salida', key: 'salida', width: 10 },
+      { header: 'Pausa (min)', key: 'pausa', width: 12 },
+      { header: 'Horas', key: 'horas', width: 10 },
+      { header: 'Horas extra del día', key: 'extra', width: 14 },
+      { header: 'Notas', key: 'notas', width: 30 }
+    ];
+
+    hojaRegistros.mergeCells('A1:I1');
+    const titulo2 = hojaRegistros.getCell('A1');
+    titulo2.value = `Registros de jornada · ${nombreTienda}`;
+    titulo2.font = { size: 16, bold: true, color: { argb: 'FFFFFF' } };
+    titulo2.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorEncabezado } };
+    titulo2.alignment = { vertical: 'middle', horizontal: 'center' };
+    hojaRegistros.getRow(1).height = 26;
+
+    hojaRegistros.mergeCells('A2:I2');
+    const sub2 = hojaRegistros.getCell('A2');
+    sub2.value = `Del ${fechaCorta(desde)} al ${fechaCorta(hasta)} · Generado el ${fechaCorta(hoyISO())}`;
+    sub2.font = { size: 10, italic: true, color: { argb: '404040' } };
+    sub2.alignment = { vertical: 'middle', horizontal: 'center' };
+
+    const encabezado = hojaRegistros.getRow(4);
+    hojaRegistros.columns.forEach((columna, indice) => {
+      const celda = encabezado.getCell(indice + 1);
+      celda.value = columna.header;
+      celda.font = { bold: true, color: { argb: 'FFFFFF' } };
+      celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorEncabezado } };
+      celda.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      celda.border = {
+        top: { style: 'thin' }, bottom: { style: 'thin' },
+        left: { style: 'thin' }, right: { style: 'thin' }
+      };
+    });
+    hojaRegistros.getRow(4).height = 20;
+
+    let filaReg = 5;
+    let totalHoras = 0;
+    let totalPausa = 0;
+    for (const turno of reporte.detalle) {
+      hojaRegistros.getCell(filaReg, 1).value = turno.fecha;
+      hojaRegistros.getCell(filaReg, 2).value = turno.colaborador_nombre;
+      hojaRegistros.getCell(filaReg, 3).value = turno.colaborador_puesto || '—';
+      hojaRegistros.getCell(filaReg, 4).value = turno.entrada.slice(11, 16);
+      hojaRegistros.getCell(filaReg, 5).value = turno.salida ? turno.salida.slice(11, 16) : 'En curso';
+      hojaRegistros.getCell(filaReg, 6).value = redondear(turno.pausa_minutos);
+      hojaRegistros.getCell(filaReg, 7).value = turno.horas !== null ? redondear(turno.horas) : null;
+      hojaRegistros.getCell(filaReg, 8).value = turno.extra_dia ? redondear(turno.extra_dia) : null;
+      hojaRegistros.getCell(filaReg, 9).value = turno.notas || '';
+
+      for (let i = 1; i <= 9; i++) {
+        const celda = hojaRegistros.getCell(filaReg, i);
+        celda.border = {
+          top: { style: 'thin', color: { argb: 'D9D9D9' } },
+          bottom: { style: 'thin', color: { argb: 'D9D9D9' } },
+          left: { style: 'thin', color: { argb: 'D9D9D9' } },
+          right: { style: 'thin', color: { argb: 'D9D9D9' } }
+        };
+        if (i === 1 || i === 4 || i === 5) celda.alignment = { horizontal: 'center' };
+        if (i === 6 || i === 7 || i === 8) {
+          celda.alignment = { horizontal: 'center' };
+          celda.numFmt = '0.00';
+        }
+      }
+      totalHoras += turno.horas || 0;
+      totalPausa += turno.pausa_minutos || 0;
+      filaReg += 1;
+    }
+
+    // Fila de totales
+    hojaRegistros.getCell(filaReg, 1).value = 'TOTALES';
+    hojaRegistros.getCell(filaReg, 6).value = redondear(totalPausa);
+    hojaRegistros.getCell(filaReg, 7).value = redondear(totalHoras);
+    hojaRegistros.getCell(filaReg, 8).value = redondear(reporte.totales.extra);
+    for (let i = 1; i <= 9; i++) {
+      const celda = hojaRegistros.getCell(filaReg, i);
+      celda.font = { bold: true };
+      celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorTotales } };
+      celda.border = {
+        top: { style: 'thin' }, bottom: { style: 'thin' },
+        left: { style: 'thin' }, right: { style: 'thin' }
+      };
+      if (i === 6 || i === 7 || i === 8) {
+        celda.alignment = { horizontal: 'center' };
+        celda.numFmt = '0.00';
+      }
+    }
+    filaReg += 2;
+
+    if (!reporte.detalle.length) {
+      hojaRegistros.getCell(filaReg, 1).value = 'No hay turnos completados en este rango de fechas.';
+      hojaRegistros.getCell(filaReg, 1).font = { italic: true, color: { argb: '808080' } };
+    }
+
+    hojaRegistros.views = [{ state: 'frozen', ySplit: 4 }];
+    hojaRegistros.autoFilter = { from: 'A4', to: 'I4' };
+
+    const buffer = await libro.xlsx.writeBuffer();
+    const nombreArchivo = `reporte-horas-${desde}-a-${hasta}.xlsx`;
+
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${nombreArchivo}"`
+    );
+    res.send(buffer);
+  })
+);
 
 app.get(
   '/api/config',

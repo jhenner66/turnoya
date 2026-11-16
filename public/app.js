@@ -1153,14 +1153,14 @@ function filaTotales(columnas, valores) {
   `;
 }
 
-function descargarCSV(filtros) {
+function descargarExcel(filtros) {
   const parametros = new URLSearchParams({
     desde: filtros.desde,
     hasta: filtros.hasta
   });
   if (filtros.colaborador_id) parametros.set('colaborador_id', filtros.colaborador_id);
   const enlace = document.createElement('a');
-  enlace.href = `/api/reportes/csv?${parametros.toString()}`;
+  enlace.href = `/api/reportes/excel?${parametros.toString()}`;
   enlace.download = '';
   document.body.appendChild(enlace);
   enlace.click();
@@ -1637,8 +1637,8 @@ function conectarEventos() {
 
   $('#btn-exportar-registros').addEventListener('click', () => {
     try {
-      descargarCSV(leerFiltros('#filtro-reg-desde', '#filtro-reg-hasta', '#filtro-reg-colaborador'));
-      toast('Descargando CSV…');
+      descargarExcel(leerFiltros('#filtro-reg-desde', '#filtro-reg-hasta', '#filtro-reg-colaborador'));
+      toast('Descargando Excel…');
     } catch (error) {
       toast(error.message, 'error');
     }
@@ -1661,8 +1661,8 @@ function conectarEventos() {
 
   $('#btn-exportar-reporte').addEventListener('click', () => {
     try {
-      descargarCSV(leerFiltros('#filtro-rep-desde', '#filtro-rep-hasta', '#filtro-rep-colaborador'));
-      toast('Descargando CSV…');
+      descargarExcel(leerFiltros('#filtro-rep-desde', '#filtro-rep-hasta', '#filtro-rep-colaborador'));
+      toast('Descargando Excel…');
     } catch (error) {
       toast(error.message, 'error');
     }
