@@ -1753,3 +1753,123 @@ textarea {
     min-width: 0;
   }
 }
+
+/* ---------------- Reportes como tarjetas en móvil ---------------- */
+
+@media (max-width: 720px) {
+  #tabla-reporte-colabs,
+  #tabla-reporte-colabs thead,
+  #tabla-reporte-colabs tbody,
+  #tabla-reporte-colabs tr,
+  #tabla-reporte-colabs th,
+  #tabla-reporte-colabs td,
+  #tabla-reporte-dias,
+  #tabla-reporte-dias thead,
+  #tabla-reporte-dias tbody,
+  #tabla-reporte-dias tr,
+  #tabla-reporte-dias th,
+  #tabla-reporte-dias td {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #tabla-reporte-colabs thead,
+  #tabla-reporte-dias thead {
+    display: none;
+  }
+
+  #tabla-reporte-colabs tbody tr,
+  #tabla-reporte-dias tbody tr {
+    margin-bottom: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  #tabla-reporte-colabs td,
+  #tabla-reporte-dias td {
+    border: 0;
+    padding: 6px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: right;
+  }
+
+  #tabla-reporte-colabs td::before,
+  #tabla-reporte-dias td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    flex-shrink: 0;
+    text-align: left;
+  }
+
+  #tabla-reporte-colabs td[data-label="Colaborador"] {
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  #tabla-reporte-colabs td[data-label="Colaborador"]::before {
+    display: none;
+  }
+
+  #tabla-reporte-colabs .cell-person {
+    min-width: 0;
+  }
+
+  /* Totales: se mantienen en horizontal */
+  #tabla-registros .total-row,
+  #tabla-reporte-colabs .total-row,
+  #tabla-reporte-dias .total-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 4px;
+    padding: 10px 12px;
+    border: 1px dashed var(--line);
+    border-radius: 12px;
+    background: #f8fafc;
+  }
+
+  #tabla-registros .total-row td,
+  #tabla-reporte-colabs .total-row td,
+  #tabla-reporte-dias .total-row td {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 6px;
+    border: 0;
+    background: transparent;
+    width: auto;
+    min-width: 0;
+    font-weight: 600;
+  }
+
+  #tabla-registros .total-row td::before,
+  #tabla-reporte-colabs .total-row td::before,
+  #tabla-reporte-dias .total-row td::before {
+    display: none;
+  }
+
+  #tabla-registros .total-row td:empty,
+  #tabla-reporte-colabs .total-row td:empty,
+  #tabla-reporte-dias .total-row td:empty {
+    display: none;
+  }
+
+  #tabla-registros .total-row td:first-child,
+  #tabla-reporte-colabs .total-row td:first-child,
+  #tabla-reporte-dias .total-row td:first-child {
+    width: 100%;
+    font-weight: 700;
+    padding-left: 0;
+  }
+}

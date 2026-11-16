@@ -573,7 +573,7 @@ function renderColaboradores() {
               ${colaborador.activo ? 'Activo' : 'Inactivo'}
             </span>
           </td>
-          <td>
+          <td data-label="Colaborador">
             <div class="row-actions">
               <button class="btn ghost small" type="button" data-accion="editar-colaborador" data-id="${colaborador.id}">
                 Editar
@@ -1078,7 +1078,7 @@ function renderReporte() {
         .map(
           (colaborador) => `
             <tr>
-              <td>
+              <td data-label="Colaborador">
                 <div class="cell-person">
                   <div class="avatar">${escapar(iniciales(colaborador.colaborador_nombre))}</div>
                   <div>
@@ -1087,12 +1087,12 @@ function renderReporte() {
                   </div>
                 </div>
               </td>
-              <td>${escapar(colaborador.colaborador_puesto || '—')}</td>
-              <td class="right cell-mono">${colaborador.dias}</td>
-              <td class="right cell-mono">${colaborador.turnos}</td>
-              <td class="right cell-mono">${colaborador.pausa_minutos ? formatoMinutos(colaborador.pausa_minutos) : '—'}</td>
-              <td class="right cell-mono"><strong>${formatoHoras(colaborador.horas)}</strong></td>
-              <td class="right cell-mono">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
+              <td data-label="Puesto">${escapar(colaborador.colaborador_puesto || '—')}</td>
+              <td class="right cell-mono" data-label="Días">${colaborador.dias}</td>
+              <td class="right cell-mono" data-label="Turnos">${colaborador.turnos}</td>
+              <td class="right cell-mono" data-label="Pausas">${colaborador.pausa_minutos ? formatoMinutos(colaborador.pausa_minutos) : '—'}</td>
+              <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(colaborador.horas)}</strong></td>
+              <td class="right cell-mono" data-label="Horas extra">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
             </tr>
           `
         )
@@ -1121,11 +1121,11 @@ function renderReporte() {
         .map(
           (dia) => `
             <tr>
-              <td class="cell-mono">${fechaCorta(dia.fecha)}</td>
-              <td class="right cell-mono">${dia.turnos}</td>
-              <td class="right cell-mono">${dia.pausa_minutos ? formatoMinutos(dia.pausa_minutos) : '—'}</td>
-              <td class="right cell-mono"><strong>${formatoHoras(dia.horas)}</strong></td>
-              <td class="right cell-mono">${dia.extra ? formatoHoras(dia.extra) : '—'}</td>
+              <td class="cell-mono" data-label="Fecha">${fechaCorta(dia.fecha)}</td>
+              <td class="right cell-mono" data-label="Turnos">${dia.turnos}</td>
+              <td class="right cell-mono" data-label="Pausas">${dia.pausa_minutos ? formatoMinutos(dia.pausa_minutos) : '—'}</td>
+              <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(dia.horas)}</strong></td>
+              <td class="right cell-mono" data-label="Horas extra">${dia.extra ? formatoHoras(dia.extra) : '—'}</td>
             </tr>
           `
         )
