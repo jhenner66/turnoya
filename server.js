@@ -903,6 +903,7 @@ app.get(
       node: process.version,
       modo: esRemota ? 'nube' : 'local',
       base_datos: esRemota ? 'Turso (nube)' : 'data/tienda.db',
+      zona_horaria: process.env.TZ || null,
       hora_servidor: aISOlocal(),
       direcciones: esRemota
         ? []
