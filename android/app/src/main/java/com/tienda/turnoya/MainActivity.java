@@ -40,6 +40,7 @@ public class MainActivity extends Activity {
 
     private static final String PREFS = "turnoya";
     private static final String KEY_URL = "server_url";
+    private static final String URL_POR_DEFECTO = "https://turnoya-phi.vercel.app";
     private static final String PUERTO_POR_DEFECTO = "3000";
     private static final int REQ_ALMACENAMIENTO = 1001;
 
@@ -86,11 +87,12 @@ public class MainActivity extends Activity {
 
         String guardada = prefs.getString(KEY_URL, null);
         if (guardada == null || guardada.trim().isEmpty()) {
-            mostrarSetup(null);
-        } else {
-            urlInput.setText(guardada);
-            cargarServidor(guardada);
+            // Primera apertura: se conecta directamente a la versión en línea.
+            guardada = URL_POR_DEFECTO;
+            prefs.edit().putString(KEY_URL, guardada).apply();
         }
+        urlInput.setText(guardada);
+        cargarServidor(guardada);
     }
 
     private void configurarFormulario() {
@@ -141,7 +143,7 @@ public class MainActivity extends Activity {
         ajustes.setAllowFileAccess(false);
         ajustes.setAllowContentAccess(false);
         ajustes.setSaveFormData(false);
-        ajustes.setUserAgentString(ajustes.getUserAgentString() + " TurnoYa/1.1");
+        ajustes.setUserAgentString(ajustes.getUserAgentString() + " TurnoYa/1.2");
 
         CookieManager.getInstance().setAcceptCookie(true);
 
@@ -276,6 +278,8 @@ public class MainActivity extends Activity {
         String guardada = prefs.getString(KEY_URL, null);
         if (guardada != null && !guardada.isEmpty()) {
             urlInput.setText(guardada);
+        } else if (urlInput.getText().toString().trim().isEmpty()) {
+            urlInput.setText(URL_POR_DEFECTO);
         }
 
         if (mensaje != null && !mensaje.isEmpty()) {

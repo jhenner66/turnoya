@@ -291,14 +291,15 @@ app.post(
     if (!nombre) throw new HttpError(400, 'El nombre es obligatorio.');
 
     const info = await ejecutar(
-      `INSERT INTO colaboradores (nombre, puesto, email, telefono, activo)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO colaboradores (nombre, puesto, email, telefono, activo, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         nombre,
         texto(req.body.puesto, 80),
         texto(req.body.email, 120),
         texto(req.body.telefono, 40),
-        req.body.activo === false ? 0 : 1
+        req.body.activo === false ? 0 : 1,
+        aISOlocal()
       ]
     );
 
@@ -452,8 +453,8 @@ app.post(
 
     const ahora = aISOlocal();
     const info = await ejecutar(
-      'INSERT INTO turnos (colaborador_id, fecha, entrada, notas) VALUES (?, ?, ?, ?)',
-      [colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500)]
+      'INSERT INTO turnos (colaborador_id, fecha, entrada, notas, creado_en) VALUES (?, ?, ?, ?, ?)',
+      [colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500), ahora]
     );
 
     res.status(201).json(mapearTurno(await obtenerTurno(info.lastInsertRowid)));
@@ -550,15 +551,16 @@ app.post(
 
     const info = await ejecutar(
       `INSERT INTO turnos
-       (colaborador_id, fecha, entrada, salida, pausa_minutos, notas)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       (colaborador_id, fecha, entrada, salida, pausa_minutos, notas, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         colaborador.id,
         entrada.slice(0, 10),
         entrada,
         salida,
         pausaMinutos,
-        texto(req.body.notas, 500)
+        texto(req.body.notas, 500),
+        aISOlocal()
       ]
     );
 
