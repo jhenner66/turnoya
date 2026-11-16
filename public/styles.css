@@ -1753,6 +1753,11 @@ textarea {
   #tabla-registros .cell-person {
     min-width: 0;
   }
+
+  #tabla-registros .total-row,
+  #tabla-registros tfoot {
+    display: none;
+  }
 }
 
 /* ---------------- Registros: sin desplazamiento horizontal en móvil ---------------- */
