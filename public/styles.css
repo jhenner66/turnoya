@@ -1873,3 +1873,27 @@ textarea {
     padding-left: 0;
   }
 }
+
+/* ---------------- Sin desplazamiento horizontal en móvil ---------------- */
+
+@media (max-width: 720px) {
+  .table-wrap {
+    overflow: hidden;
+    max-width: 100%;
+  }
+
+  .table {
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+
+  .table td {
+    flex-wrap: wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .table td::before {
+    white-space: nowrap;
+  }
+}
