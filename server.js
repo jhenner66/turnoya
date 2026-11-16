@@ -1,5 +1,12 @@
 // Zona horaria configurable: en Vercel `TZ` es un nombre reservado, por eso
-// se usa TURNOYA_TZ (por ejemplo America/Caracas).
+// se usa TURNOYA_TZ (por ejemplo America/Caracas). Si no se define, se usa
+// la zona horaria del sistema.
+const ZONA_HORARIA = (
+  process.env.TURNOYA_TZ ||
+  process.env.TZ ||
+  ''
+).trim() || null;
+
 if (process.env.TURNOYA_TZ) {
   process.env.TZ = process.env.TURNOYA_TZ;
 }
@@ -82,9 +89,22 @@ const ruta = (fn) => async (req, res, next) => {
 const pad = (n) => String(n).padStart(2, '0');
 
 function aISOlocal(fecha = new Date()) {
+  const opciones = {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  };
+  if (ZONA_HORARIA) opciones.timeZone = ZONA_HORARIA;
+  const partes = new Intl.DateTimeFormat('en-GB', opciones).formatToParts(fecha);
+  const get = (tipo) => partes.find((p) => p.type === tipo).value;
+  const hora = get('hour') === '24' ? '00' : get('hour');
   return (
-    `${fecha.getFullYear()}-${pad(fecha.getMonth() + 1)}-${pad(fecha.getDate())}` +
-    `T${pad(fecha.getHours())}:${pad(fecha.getMinutes())}:${pad(fecha.getSeconds())}`
+    `${get('year')}-${get('month')}-${get('day')}` +
+    `T${hora}:${get('minute')}:${get('second')}`
   );
 }
 
@@ -103,20 +123,22 @@ function leerFechaHora(valor) {
   );
   if (!m) return null;
   const fecha = new Date(
-    Number(m[1]),
-    Number(m[2]) - 1,
-    Number(m[3]),
-    Number(m[4]),
-    Number(m[5]),
-    Number(m[6] || 0),
-    0
+    Date.UTC(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      Number(m[6] || 0),
+      0
+    )
   );
   if (
-    fecha.getFullYear() !== Number(m[1]) ||
-    fecha.getMonth() !== Number(m[2]) - 1 ||
-    fecha.getDate() !== Number(m[3]) ||
-    fecha.getHours() !== Number(m[4]) ||
-    fecha.getMinutes() !== Number(m[5])
+    fecha.getUTCFullYear() !== Number(m[1]) ||
+    fecha.getUTCMonth() !== Number(m[2]) - 1 ||
+    fecha.getUTCDate() !== Number(m[3]) ||
+    fecha.getUTCHours() !== Number(m[4]) ||
+    fecha.getUTCMinutes() !== Number(m[5])
   ) {
     return null;
   }
@@ -124,11 +146,14 @@ function leerFechaHora(valor) {
 }
 
 function normalizarFechaHora(valor, campo) {
-  const fecha = leerFechaHora(valor);
-  if (!fecha) {
+  const texto = String(valor ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
+    texto
+  );
+  if (!m || !leerFechaHora(texto)) {
     throw new HttpError(400, `La ${campo} no es válida. Usa el formato AAAA-MM-DD HH:MM.`);
   }
-  return aISOlocal(fecha);
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6] || '00'}`;
 }
 
 function minutosEntre(desdeISO, hastaISO) {
