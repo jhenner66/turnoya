@@ -106,6 +106,7 @@ const state = {
   config: { nombre_tienda: 'Mi Tienda', jornada_horas: '8' },
   info: null,
   reporte: null,
+  reporteColaboradorAbierto: null,
   registros: [],
   busquedaInicio: '',
   busquedaColabs: '',
@@ -1166,7 +1167,7 @@ function renderReporte() {
 
   $('#reporte-rango').textContent = `Del ${fechaCorta(reporte.desde)} al ${fechaCorta(
     reporte.hasta
-  )} · Jornada diaria de ${formatoHoras(reporte.umbral)}`;
+  )} · Jornada diaria de ${formatoHoras(reporte.umbral)} · Toca un colaborador para ver sus registros`;
 
   const cuerpoColabs = $('#tabla-reporte-colabs');
   if (!reporte.por_colaborador.length) {
@@ -1178,15 +1179,16 @@ function renderReporte() {
   } else {
     cuerpoColabs.innerHTML =
       reporte.por_colaborador
-        .map(
-          (colaborador) => `
-            <tr>
+        .map((colaborador) => {
+          const abierto = state.reporteColaboradorAbierto === colaborador.colaborador_id;
+          return `
+            <tr class="colab-summary-row${abierto ? ' is-open' : ''}" data-colab-detalle="${colaborador.colaborador_id}" tabindex="0" role="button" aria-expanded="${abierto}">
               <td data-label="Colaborador">
                 <div class="cell-person">
                   ${avatarHTML(colaborador.colaborador_nombre)}
                   <div>
                     <strong>${escapar(colaborador.colaborador_nombre)}</strong>
-                    <span>${colaborador.turnos} turno${colaborador.turnos === 1 ? '' : 's'}</span>
+                    <span class="colab-sub-link">${colaborador.turnos} turno${colaborador.turnos === 1 ? '' : 's'} · <em>${abierto ? 'Ocultar registros ▴' : 'Ver registros ▾'}</em></span>
                   </div>
                 </div>
               </td>
@@ -1206,8 +1208,9 @@ function renderReporte() {
               </td>
               <td class="right cell-mono${colaborador.extra ? ' cell-extra-on' : ''}" data-label="Horas extra">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
             </tr>
-          `
-        )
+            ${abierto ? renderDetalleColaboradorFila(colaborador, reporte) : ''}
+          `;
+        })
         .join('') +
       filaTotales(7, [
         `Totales`,
@@ -1251,6 +1254,65 @@ function renderReporte() {
       ]);
   }
   aplicarEstilosDinamicos(cuerpoColabs);
+}
+
+function renderDetalleColaboradorFila(colaborador, reporte) {
+  const turnos = (reporte.detalle || []).filter(
+    (t) => t.colaborador_id === colaborador.colaborador_id
+  );
+
+  const filas = turnos
+    .map(
+      (turno) => `
+        <tr>
+          <td class="cell-mono" data-label="Fecha">${fechaCorta(turno.fecha)}</td>
+          <td class="cell-mono" data-label="Entrada">${horaCorta(turno.entrada)}</td>
+          <td class="cell-mono" data-label="Salida">${turno.salida ? horaCorta(turno.salida) : '—'}</td>
+          <td class="right cell-mono" data-label="Pausa">${turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—'}</td>
+          <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(turno.horas)}</strong></td>
+          <td class="right cell-mono${turno.extra_dia ? ' cell-extra-on' : ''}" data-label="Extra del día">${turno.extra_dia ? formatoHoras(turno.extra_dia) : '—'}</td>
+          <td class="colab-detail-note" data-label="Notas">${turno.notas ? escapar(turno.notas) : '<span class="muted">—</span>'}</td>
+        </tr>
+      `
+    )
+    .join('');
+
+  return `
+    <tr class="colab-detail-row">
+      <td colspan="7">
+        <div class="colab-detail-box">
+          <div class="colab-detail-head">
+            <div>
+              <strong>Registros de ${escapar(colaborador.colaborador_nombre)}</strong>
+              <span class="muted"> · Del ${fechaCorta(reporte.desde)} al ${fechaCorta(reporte.hasta)} (${turnos.length} turno${turnos.length === 1 ? '' : 's'})</span>
+            </div>
+            <div class="colab-detail-actions">
+              <button class="btn ghost small" type="button" data-exportar-colab="${colaborador.colaborador_id}">
+                Exportar Excel de ${escapar(colaborador.colaborador_nombre.split(' ')[0])}
+              </button>
+              <button class="btn ghost small" type="button" data-cerrar-detalle>Cerrar ✕</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="table sub-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Entrada</th>
+                  <th>Salida</th>
+                  <th class="right">Pausa</th>
+                  <th class="right">Horas</th>
+                  <th class="right">Extra del día</th>
+                  <th>Notas</th>
+                </tr>
+              </thead>
+              <tbody>${filas}</tbody>
+            </table>
+          </div>
+        </div>
+      </td>
+    </tr>
+  `;
 }
 
 function renderResumenReporte(reporte) {
@@ -1837,6 +1899,49 @@ function conectarEventos() {
       toast(error.message, 'error');
     }
   });
+
+  const tablaReporteColabs = $('#tabla-reporte-colabs');
+  if (tablaReporteColabs) {
+    const alternarColab = (id) => {
+      state.reporteColaboradorAbierto =
+        state.reporteColaboradorAbierto === id ? null : id;
+      renderReporte();
+    };
+
+    tablaReporteColabs.addEventListener('click', (evento) => {
+      const btnExportar = evento.target.closest('[data-exportar-colab]');
+      if (btnExportar) {
+        evento.stopPropagation();
+        const reporte = state.reporte || {};
+        descargarExcel({
+          desde: reporte.desde || state.filtros.reportes.desde,
+          hasta: reporte.hasta || state.filtros.reportes.hasta,
+          colaborador_id: btnExportar.dataset.exportarColab
+        });
+        toast('Descargando Excel del colaborador…');
+        return;
+      }
+
+      if (evento.target.closest('[data-cerrar-detalle]')) {
+        evento.stopPropagation();
+        state.reporteColaboradorAbierto = null;
+        renderReporte();
+        return;
+      }
+
+      const fila = evento.target.closest('[data-colab-detalle]');
+      if (!fila) return;
+      alternarColab(Number(fila.dataset.colabDetalle));
+    });
+
+    tablaReporteColabs.addEventListener('keydown', (evento) => {
+      if (evento.key !== 'Enter' && evento.key !== ' ') return;
+      const fila = evento.target.closest('[data-colab-detalle]');
+      if (!fila) return;
+      evento.preventDefault();
+      alternarColab(Number(fila.dataset.colabDetalle));
+    });
+  }
 
   $('#lan-list').addEventListener('click', async (evento) => {
     const boton = evento.target.closest('[data-copiar]');
