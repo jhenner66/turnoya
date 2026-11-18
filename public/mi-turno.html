@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="description" content="Portal del colaborador · Marca tu entrada, pausa y salida, y consulta tus horas y registros." />
+  <title>Mi Turno · TurnoYa</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%230f766e'/><circle cx='50' cy='50' r='28' fill='none' stroke='white' stroke-width='8'/><path d='M50 32v20l13 9' fill='none' stroke='white' stroke-width='8' stroke-linecap='round'/></svg>" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="worker-body">
+  <div class="worker-shell">
+    <header class="worker-header">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M12 7v5l3.2 2"></path>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <strong id="worker-store">Mi Tienda</strong>
+          <span>Portal del colaborador</span>
+        </div>
+      </div>
+
+      <div class="worker-header-right">
+        <button class="btn ghost small hidden" id="btn-cambiar-persona" type="button">
+          Cambiar de persona
+        </button>
+        <div class="live-clock" aria-live="off">
+          <span id="live-clock">--:--:--</span>
+          <span id="live-date">Cargando…</span>
+        </div>
+      </div>
+    </header>
+
+    <div class="connection-banner hidden" id="connection-banner" role="status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 9v4"></path><path d="M12 17h.01"></path>
+        <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path>
+      </svg>
+      <span id="connection-text">Sin conexión con el servidor.</span>
+      <button class="btn small" id="btn-reintentar-conexion" type="button">Reintentar</button>
+    </div>
+
+    <!-- PASO 1: Seleccionar quién eres -->
+    <section class="panel" id="vista-seleccion">
+      <div class="panel-head">
+        <div>
+          <h1 class="worker-select-title" id="saludo-seleccion">Hola, ¿quién eres?</h1>
+          <p class="muted">Toca tu nombre para marcar tu entrada, pausa o salida y ver tus horas.</p>
+        </div>
+        <div class="search-box">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>
+          </svg>
+          <input type="search" id="buscar-persona" placeholder="Buscar mi nombre…" autocomplete="off" aria-label="Buscar mi nombre" />
+        </div>
+      </div>
+      <div class="worker-pick-grid" id="lista-personas">
+        <div class="skeleton-card"></div>
+        <div class="skeleton-card"></div>
+      </div>
+    </section>
+
+    <!-- PASO 2: Panel personal del colaborador -->
+    <main class="worker-main hidden" id="vista-panel">
+      <!-- Tarjeta de fichaje en vivo -->
+      <section class="panel worker-punch-card" id="tarjeta-jornada">
+        <div class="worker-punch-head">
+          <div class="worker-person">
+            <div class="avatar avatar-lg" id="persona-avatar">?</div>
+            <div>
+              <span class="muted small" id="persona-saludo">Hola</span>
+              <h1 id="persona-nombre">—</h1>
+              <p class="muted" id="persona-puesto">—</p>
+            </div>
+          </div>
+          <div id="persona-estado-badge"></div>
+        </div>
+
+        <div class="worker-timer-box" id="caja-cronometro">
+          <div class="worker-timer-item">
+            <span>Entrada de hoy</span>
+            <strong id="turno-entrada">—</strong>
+          </div>
+          <div class="worker-timer-item highlight">
+            <span>Tiempo trabajado</span>
+            <strong id="turno-trabajado">0 min</strong>
+          </div>
+          <div class="worker-timer-item">
+            <span>Pausa acumulada</span>
+            <strong id="turno-pausa">—</strong>
+          </div>
+        </div>
+
+        <p class="worker-pause-banner hidden" id="aviso-pausa"></p>
+
+        <div class="worker-punch-actions" id="acciones-jornada"></div>
+      </section>
+
+      <!-- Filtros de periodo para Resumen y Registros -->
+      <section class="panel">
+        <div class="panel-head wrap">
+          <div>
+            <h2>Mi resumen y registros</h2>
+            <p class="muted" id="rango-texto">Consulta tus horas trabajadas y tus turnos en el periodo seleccionado.</p>
+          </div>
+        </div>
+
+        <div class="quick-ranges" aria-label="Rangos rápidos">
+          <button class="range-btn" type="button" data-rango="hoy">Hoy</button>
+          <button class="range-btn" type="button" data-rango="semana">Esta semana</button>
+          <button class="range-btn is-active" type="button" data-rango="mes">Este mes</button>
+          <button class="range-btn" type="button" data-rango="mes-anterior">Mes anterior</button>
+        </div>
+
+        <form class="filters" id="filtros-mios">
+          <label>
+            <span>Desde</span>
+            <input type="date" id="filtro-desde" required />
+          </label>
+          <label>
+            <span>Hasta</span>
+            <input type="date" id="filtro-hasta" required />
+          </label>
+          <button class="btn dark" type="submit">Consultar</button>
+        </form>
+
+        <div class="report-summary" id="mi-resumen-texto">Cargando tu resumen…</div>
+
+        <div class="stat-grid worker-stats" id="mis-stats"></div>
+      </section>
+
+      <!-- Tabla de mis registros -->
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Mis registros de jornada</h2>
+            <p class="muted">Detalle de tus entradas, pausas y salidas en este rango de fechas.</p>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" id="tabla-registros">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Entrada</th>
+                <th>Salida</th>
+                <th>Pausa</th>
+                <th>Horas</th>
+                <th>Extra del día</th>
+                <th>Estado</th>
+              </tr>
+            </thead>
+            <tbody id="mis-registros-body"></tbody>
+            <tfoot id="mis-registros-foot"></tfoot>
+          </table>
+        </div>
+        <p class="table-note" id="mis-registros-nota"></p>
+      </section>
+    </main>
+  </div>
+
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+  <script src="/mi-turno.js" defer></script>
+</body>
+</html>

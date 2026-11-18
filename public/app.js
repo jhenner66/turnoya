@@ -1496,6 +1496,21 @@ function renderAccesoCelular(info) {
   }
 
   const enlaces = enNube && !direcciones.length ? [window.location.origin] : direcciones;
+  const listaColab = $('#worker-links-list');
+  if (listaColab) {
+    const bases = enlaces.length ? enlaces : [window.location.origin];
+    listaColab.innerHTML = bases
+      .map((base) => {
+        const urlColab = `${String(base).replace(/\/$/, '')}/mi-turno`;
+        return `
+          <li class="lan-item">
+            <code>${escapar(urlColab)}</code>
+            <button class="btn ghost small" type="button" data-copiar="${escapar(urlColab)}">Copiar enlace</button>
+          </li>`;
+      })
+      .join('');
+  }
+
   if (!enlaces.length) {
     lista.innerHTML =
       '<li class="muted small">No se detectó una dirección de red. Verifica que esta computadora esté conectada al Wi-Fi o a la red local.</li>';
@@ -1943,7 +1958,7 @@ function conectarEventos() {
     });
   }
 
-  $('#lan-list').addEventListener('click', async (evento) => {
+  document.addEventListener('click', async (evento) => {
     const boton = evento.target.closest('[data-copiar]');
     if (!boton) return;
     const ok = await copiarTexto(boton.dataset.copiar);

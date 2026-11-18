@@ -52,6 +52,11 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Vista exclusiva para colaboradores (fichaje + sus propios registros y resumen).
+app.get(['/mi-turno', '/mi-turno/', '/colaborador'], (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'mi-turno.html'));
+});
+
 // La base de datos se prepara una sola vez (importante en modo servidor sin estado).
 app.use('/api', async (req, res, next) => {
   try {
