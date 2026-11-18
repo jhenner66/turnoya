@@ -368,10 +368,16 @@ function renderJornada(persona) {
   $('#turno-pausa').textContent =
     turno && turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—';
 
+  const campoNota = $('#campo-nota-entrada');
+  if (campoNota) campoNota.classList.toggle('hidden', Boolean(turno));
+
   const avisoPausa = $('#aviso-pausa');
   if (enPausa) {
     avisoPausa.classList.remove('hidden');
     avisoPausa.innerHTML = `En pausa desde las <strong>${horaCorta(turno.pausa_inicio)}</strong> · <strong data-pause-timer data-pausa-inicio="${turno.pausa_inicio}">—</strong>`;
+  } else if (turno && turno.notas) {
+    avisoPausa.classList.remove('hidden');
+    avisoPausa.innerHTML = `📝 Nota del turno: <strong>${escapar(turno.notas)}</strong>`;
   } else {
     avisoPausa.classList.add('hidden');
     avisoPausa.textContent = '';
@@ -516,7 +522,12 @@ function renderMisRegistros(registros) {
 
       return `
         <tr>
-          <td class="cell-mono" data-label="Fecha">${fechaCorta(turno.fecha)}</td>
+          <td class="cell-mono" data-label="Fecha">
+            <div>
+              <strong>${fechaCorta(turno.fecha)}</strong>
+              ${turno.notas ? `<small class="row-note">📝 ${escapar(turno.notas)}</small>` : ''}
+            </div>
+          </td>
           <td class="cell-mono" data-label="Entrada">${horaCorta(turno.entrada)}</td>
           <td class="cell-mono" data-label="Salida">${turno.salida ? horaCorta(turno.salida) : '—'}</td>
           <td class="cell-mono" data-label="Pausa">${turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—'}</td>
@@ -701,10 +712,13 @@ function conectarEventos() {
     boton.disabled = true;
     try {
       if (accion === 'entrada') {
+        const inputNota = $('#input-nota-entrada');
+        const notas = inputNota ? inputNota.value : '';
         await api('/turnos/entrada', {
           method: 'POST',
-          body: JSON.stringify({ colaborador_id: persona.id })
+          body: JSON.stringify({ colaborador_id: persona.id, notas })
         });
+        if (inputNota) inputNota.value = '';
         vibrar(30);
         toast(`¡Buen turno, ${persona.nombre.split(' ')[0]}! Entrada registrada.`);
       } else if (accion === 'pausa') {

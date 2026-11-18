@@ -29,8 +29,11 @@
       </div>
 
       <div class="worker-header-right">
-        <button class="btn ghost small hidden" id="btn-cambiar-persona" type="button">
-          Cambiar de persona
+        <button class="worker-switch-btn hidden" id="btn-cambiar-persona" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="m17 8 4 4-4 4"></path><path d="M21 12h-6"></path>
+          </svg>
+          <span>Cambiar persona</span>
         </button>
         <div class="live-clock" aria-live="off">
           <span id="live-clock">--:--:--</span>
@@ -101,14 +104,19 @@
 
         <p class="worker-pause-banner hidden" id="aviso-pausa"></p>
 
+        <label class="worker-note-field" id="campo-nota-entrada">
+          <span>Nota de la jornada (opcional)</span>
+          <input type="text" id="input-nota-entrada" maxlength="200" placeholder="Ej. Turno de apertura, apoyo en caja…" autocomplete="off" />
+        </label>
+
         <div class="worker-punch-actions" id="acciones-jornada"></div>
       </section>
 
-      <!-- Filtros de periodo para Resumen y Registros -->
-      <section class="panel" id="seccion-resumen">
+      <!-- Selector de periodo compartido entre Resumen y Registros -->
+      <section class="panel" id="seccion-filtros">
         <div class="panel-head wrap">
           <div>
-            <h2>Mi resumen y registros</h2>
+            <h2>Periodo de consulta</h2>
             <p class="muted" id="rango-texto">Consulta tus horas trabajadas y tus turnos en el periodo seleccionado.</p>
           </div>
         </div>
@@ -131,6 +139,16 @@
           </label>
           <button class="btn dark" type="submit">Consultar</button>
         </form>
+      </section>
+
+      <!-- Resumen personal -->
+      <section class="panel" id="seccion-resumen">
+        <div class="panel-head">
+          <div>
+            <h2>Mi resumen de horas</h2>
+            <p class="muted">Totales acumulados en el rango seleccionado.</p>
+          </div>
+        </div>
 
         <div class="report-summary" id="mi-resumen-texto">Cargando tu resumen…</div>
 

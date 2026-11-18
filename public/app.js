@@ -109,6 +109,7 @@ const state = {
   reporteColaboradorAbierto: null,
   registros: [],
   busquedaInicio: '',
+  filtroEstadoInicio: 'todos',
   busquedaColabs: '',
   filtros: {
     registros: { desde: inicioDeMes(), hasta: hoyISO(), colaborador_id: '' },
@@ -436,8 +437,39 @@ function renderInicio() {
     (state.estado.activos || []).map((turno) => [turno.colaborador_id, turno])
   );
 
-  const visibles = state.colaboradores.filter((colaborador) => {
-    if (!colaborador.activo && !activosPorColaborador.has(colaborador.id)) return false;
+  const baseActivos = state.colaboradores.filter(
+    (c) => c.activo || activosPorColaborador.has(c.id)
+  );
+  const conteos = { todos: baseActivos.length, turno: 0, pausa: 0, fuera: 0 };
+  for (const colab of baseActivos) {
+    const t = activosPorColaborador.get(colab.id);
+    if (!t) conteos.fuera += 1;
+    else if (t.en_pausa) conteos.pausa += 1;
+    else conteos.turno += 1;
+  }
+
+  const barraFiltros = $('#filtros-estado-inicio');
+  if (barraFiltros) {
+    barraFiltros.classList.toggle('hidden', !baseActivos.length);
+    const etiquetas = {
+      todos: `Todos (${conteos.todos})`,
+      turno: `En turno (${conteos.turno})`,
+      pausa: `En pausa (${conteos.pausa})`,
+      fuera: `Fuera (${conteos.fuera})`
+    };
+    $$('[data-estado-inicio]', barraFiltros).forEach((b) => {
+      const clave = b.dataset.estadoInicio;
+      if (etiquetas[clave]) b.textContent = etiquetas[clave];
+      b.classList.toggle('is-active', clave === state.filtroEstadoInicio);
+    });
+  }
+
+  const visibles = baseActivos.filter((colaborador) => {
+    const turno = activosPorColaborador.get(colaborador.id);
+    if (state.filtroEstadoInicio === 'turno' && (!turno || turno.en_pausa)) return false;
+    if (state.filtroEstadoInicio === 'pausa' && (!turno || !turno.en_pausa)) return false;
+    if (state.filtroEstadoInicio === 'fuera' && turno) return false;
+
     const busqueda = state.busquedaInicio.trim().toLowerCase();
     if (!busqueda) return true;
     return `${colaborador.nombre} ${colaborador.puesto}`.toLowerCase().includes(busqueda);
@@ -503,8 +535,11 @@ function tarjetaColaborador(colaborador, turno) {
     `;
   }
 
-  const nota = enPausa
+  const notaPausa = enPausa
     ? `<p class="emp-note">Pausa desde las ${horaCorta(turno.pausa_inicio)} · <strong data-pause-timer data-pausa-inicio="${turno.pausa_inicio}">—</strong></p>`
+    : '';
+  const notaTurno = turno && turno.notas
+    ? `<p class="emp-shift-note">📝 ${escapar(turno.notas)}</p>`
     : '';
 
   return `
@@ -532,7 +567,8 @@ function tarjetaColaborador(colaborador, turno) {
           >${turno ? duracionTurno(turno) : '—'}</strong>
         </div>
       </div>
-      ${nota}
+      ${notaPausa}
+      ${notaTurno}
       <div class="emp-actions">${acciones}</div>
     </article>
   `;
@@ -887,6 +923,7 @@ function renderRegistros() {
               <div>
                 <strong>${escapar(turno.colaborador_nombre)}</strong>
                 <span>${escapar(turno.colaborador_puesto || 'Sin puesto')}</span>
+                ${turno.notas ? `<small class="row-note">📝 ${escapar(turno.notas)}</small>` : ''}
               </div>
             </div>
           </td>
@@ -912,16 +949,20 @@ function renderRegistros() {
     .join('');
 
   if (pie) {
-    pie.innerHTML = filaTotales(8, [
-      'Totales',
-      '',
-      '',
-      '',
-      totalPausa ? formatoMinutos(totalPausa) : '—',
-      formatoHoras(totalHoras),
-      '',
-      ''
-    ]);
+    pie.innerHTML = filaTotales(
+      8,
+      [
+        'Totales',
+        '',
+        '',
+        '',
+        totalPausa ? formatoMinutos(totalPausa) : '—',
+        formatoHoras(totalHoras),
+        '',
+        ''
+      ],
+      ['', '', '', '', 'Pausa total', 'Horas totales', '', '']
+    );
   }
 
   const partes = [`${state.registros.length} registro${state.registros.length === 1 ? '' : 's'}`];
@@ -1165,9 +1206,11 @@ function renderReporte() {
     </div>
   `;
 
-  $('#reporte-rango').textContent = `Del ${fechaCorta(reporte.desde)} al ${fechaCorta(
+  const textoRango = `Del ${fechaCorta(reporte.desde)} al ${fechaCorta(
     reporte.hasta
-  )} · Jornada diaria de ${formatoHoras(reporte.umbral)} · Toca un colaborador para ver sus registros`;
+  )} · Jornada diaria de ${formatoHoras(reporte.umbral)}`;
+  $('#reporte-rango').textContent = `${textoRango} · Toca un colaborador para ver sus registros`;
+  if ($('#print-range')) $('#print-range').textContent = textoRango;
 
   const cuerpoColabs = $('#tabla-reporte-colabs');
   if (!reporte.por_colaborador.length) {
@@ -1463,6 +1506,8 @@ function leerFiltros(desdeSelector, hastaSelector, colaboradorSelector) {
 function aplicarConfig() {
   const nombre = state.config.nombre_tienda || 'Mi Tienda';
   $('#sidebar-store').textContent = nombre;
+  if ($('#mobile-store-name')) $('#mobile-store-name').textContent = nombre;
+  if ($('#print-store')) $('#print-store').textContent = nombre;
   document.title = `Control de Horas · ${nombre}`;
   $('#config-nombre').value = nombre;
   $('#config-jornada').value = state.config.jornada_horas || 8;
@@ -1800,6 +1845,16 @@ function conectarEventos() {
     state.busquedaInicio = evento.target.value;
     renderInicio();
   });
+
+  const barraEstadoInicio = $('#filtros-estado-inicio');
+  if (barraEstadoInicio) {
+    barraEstadoInicio.addEventListener('click', (evento) => {
+      const boton = evento.target.closest('[data-estado-inicio]');
+      if (!boton) return;
+      state.filtroEstadoInicio = boton.dataset.estadoInicio;
+      renderInicio();
+    });
+  }
 
   $('#buscar-colabs').addEventListener('input', (evento) => {
     state.busquedaColabs = evento.target.value;

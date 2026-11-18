@@ -82,6 +82,11 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-title">
+          <div class="mobile-brand-bar">
+            <span class="store-dot" aria-hidden="true"></span>
+            <strong id="mobile-store-name">Mi Tienda</strong>
+            <a class="mobile-worker-pill" href="/mi-turno">Modo Colaborador →</a>
+          </div>
           <h1 id="view-title">Inicio</h1>
           <p id="view-subtitle">Marca entradas, pausas y salidas del personal.</p>
         </div>
@@ -120,6 +125,12 @@
                 </svg>
                 <input type="search" id="buscar-inicio" placeholder="Buscar colaborador…" autocomplete="off" aria-label="Buscar colaborador" />
               </div>
+            </div>
+            <div class="quick-ranges status-filters" id="filtros-estado-inicio" aria-label="Filtrar por estado">
+              <button class="range-btn is-active" type="button" data-estado-inicio="todos">Todos</button>
+              <button class="range-btn" type="button" data-estado-inicio="turno">En turno</button>
+              <button class="range-btn" type="button" data-estado-inicio="pausa">En pausa</button>
+              <button class="range-btn" type="button" data-estado-inicio="fuera">Fuera de turno</button>
             </div>
             <div class="cards-grid" id="inicio-cards">
               <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
@@ -242,6 +253,10 @@
 
         <!-- REPORTES -->
         <section class="view hidden" id="view-reportes">
+          <div class="print-header" id="print-header">
+            <strong id="print-store">Mi Tienda</strong>
+            <span id="print-range">Reporte de horas</span>
+          </div>
           <div class="panel">
             <div class="panel-head wrap">
               <div>
