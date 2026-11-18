@@ -94,7 +94,10 @@
 
         <!-- INICIO -->
         <section class="view" id="view-inicio">
-          <div class="stat-grid" id="inicio-stats"></div>
+          <div class="stat-grid" id="inicio-stats">
+            <div class="skeleton-stat"></div><div class="skeleton-stat"></div>
+            <div class="skeleton-stat"></div><div class="skeleton-stat"></div>
+          </div>
 
           <div class="panel">
             <div class="panel-head">
@@ -109,8 +112,17 @@
                 <input type="search" id="buscar-inicio" placeholder="Buscar colaborador…" autocomplete="off" aria-label="Buscar colaborador" />
               </div>
             </div>
-            <div class="cards-grid" id="inicio-cards"></div>
+            <div class="cards-grid" id="inicio-cards">
+              <div class="skeleton-card"></div><div class="skeleton-card"></div><div class="skeleton-card"></div>
+            </div>
           </div>
+
+          <button class="fab" id="btn-fab-entrada" type="button" aria-label="Marcar entrada rápida">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3.2 2"></path>
+            </svg>
+            <span>Marcar entrada</span>
+          </button>
         </section>
 
         <!-- COLABORADORES -->
@@ -173,9 +185,9 @@
 
             <div class="quick-ranges" data-destino="registros" aria-label="Rangos rápidos">
               <button class="range-btn" type="button" data-rango="hoy" data-destino="registros">Hoy</button>
-              <button class="range-btn" type="button" data-rango="semana" data-destino="registros">Esta semana</button>
-              <button class="range-btn is-active" type="button" data-rango="mes" data-destino="registros">Este mes</button>
-              <button class="range-btn" type="button" data-rango="mes-anterior" data-destino="registros">Mes anterior</button>
+              <button class="range-btn" type="button" title="Desde el lunes hasta hoy" data-rango="semana" data-destino="registros">Esta semana</button>
+              <button class="range-btn is-active" type="button" title="Desde el día 1 de este mes hasta hoy" data-rango="mes" data-destino="registros">Este mes</button>
+              <button class="range-btn" type="button" title="El mes calendario completo anterior" data-rango="mes-anterior" data-destino="registros">Mes anterior</button>
             </div>
 
             <form class="filters" id="filtros-registros">
@@ -225,7 +237,7 @@
             <div class="panel-head wrap">
               <div>
                 <h2>Reporte de horas</h2>
-                <p class="muted">Totales por colaborador y por día, con horas extra.</p>
+                <p class="muted">Solo cuenta turnos terminados (con salida marcada). Las horas extra se calculan por día.</p>
               </div>
               <div class="head-actions">
                 <button class="btn ghost" id="btn-imprimir-reporte" type="button">
@@ -245,9 +257,9 @@
 
             <div class="quick-ranges" data-destino="reportes" aria-label="Rangos rápidos">
               <button class="range-btn" type="button" data-rango="hoy" data-destino="reportes">Hoy</button>
-              <button class="range-btn" type="button" data-rango="semana" data-destino="reportes">Esta semana</button>
-              <button class="range-btn is-active" type="button" data-rango="mes" data-destino="reportes">Este mes</button>
-              <button class="range-btn" type="button" data-rango="mes-anterior" data-destino="reportes">Mes anterior</button>
+              <button class="range-btn" type="button" title="Desde el lunes hasta hoy" data-rango="semana" data-destino="reportes">Esta semana</button>
+              <button class="range-btn is-active" type="button" title="Desde el día 1 de este mes hasta hoy" data-rango="mes" data-destino="reportes">Este mes</button>
+              <button class="range-btn" type="button" title="El mes calendario completo anterior" data-rango="mes-anterior" data-destino="reportes">Mes anterior</button>
             </div>
 
             <form class="filters" id="filtros-reportes">
@@ -268,6 +280,8 @@
               <button class="btn dark" type="submit">Actualizar</button>
             </form>
           </div>
+
+          <div class="report-summary" id="reporte-resumen-texto" aria-live="polite">Calculando el resumen…</div>
 
           <div class="stat-grid" id="reporte-stats"></div>
 
@@ -337,7 +351,7 @@
               </label>
               <label>
                 <span>Jornada diaria (horas)</span>
-                <input type="number" id="config-jornada" min="1" max="24" step="0.5" required />
+                <input type="number" id="config-jornada" min="1" max="24" step="0.5" required title="Horas normales de trabajo por día. Lo que pase de aquí cuenta como horas extra." />
               </label>
               <button class="btn primary" type="submit">Guardar ajustes</button>
             </form>

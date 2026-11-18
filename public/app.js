@@ -116,8 +116,36 @@ const state = {
 };
 
 function formatoHoras(horas) {
-  const numero = Number(horas || 0);
-  return `${new Intl.NumberFormat('es-MX', { maximumFractionDigits: 2 }).format(numero)} h`;
+  const minutos = Math.round(Number(horas || 0) * 60);
+  if (minutos <= 0) return '0 h';
+  return formatoMinutos(minutos);
+}
+
+// La CSP del servidor bloquea atributos style="" en el HTML, así que los
+// valores dinámicos (color de avatar, ancho de barras) se aplican por CSSOM.
+function aplicarEstilosDinamicos(raiz = document) {
+  $$('[data-hue]', raiz).forEach((el) => {
+    const hue = Number(el.dataset.hue) || 0;
+    el.style.background = `hsl(${hue} 70% 90%)`;
+    el.style.color = `hsl(${hue} 55% 30%)`;
+  });
+  $$('[data-pct]', raiz).forEach((el) => {
+    const pct = Math.max(0, Math.min(100, Number(el.dataset.pct) || 0));
+    el.style.width = `${pct}%`;
+  });
+}
+
+function avatarHTML(nombre) {
+  return `<div class="avatar" data-hue="${colorAvatar(nombre)}">${escapar(iniciales(nombre))}</div>`;
+}
+
+const ICONO_PAUSA_MINI =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1"></rect><rect x="14" y="4" width="4" height="16" rx="1"></rect></svg>';
+
+function insigniaEstado(turno) {
+  if (!turno) return '<span class="badge badge-off">Fuera de turno</span>';
+  if (turno.en_pausa) return `<span class="badge badge-pause has-icon">${ICONO_PAUSA_MINI}En pausa</span>`;
+  return '<span class="badge badge-on">En turno</span>';
 }
 
 function formatoMinutos(minutos) {
@@ -140,6 +168,26 @@ function iniciales(nombre) {
   if (!partes.length) return '?';
   if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
   return (partes[0][0] + partes[1][0]).toUpperCase();
+}
+
+function saludo() {
+  const hora = new Date().getHours();
+  if (hora >= 5 && hora < 12) return '☀️ Buenos días';
+  if (hora >= 12 && hora < 19) return '🌤️ Buenas tardes';
+  return '🌙 Buenas noches';
+}
+
+function colorAvatar(nombre) {
+  let hash = 0;
+  const str = String(nombre || '');
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return Math.abs(hash) % 360;
+}
+
+function vibrar(ms = 15) {
+  try { navigator?.vibrate?.(ms); } catch { /* no soportado */ }
 }
 
 async function api(ruta, opciones = {}) {
@@ -326,17 +374,17 @@ function cerrarModal() {
   if (cerrarModalActual) cerrarModalActual();
 }
 
-function confirmar({ titulo, mensaje, textoConfirmar = 'Eliminar', onConfirmar }) {
+function confirmar({ titulo, mensaje, textoConfirmar = 'Eliminar', peligro = true, icono = '', onConfirmar }) {
   abrirModal({
     titulo,
-    contenido: `<p class="confirm-text">${mensaje}</p>`,
+    contenido: `${icono ? `<div class="confirm-icon">${icono}</div>` : ''}<p class="confirm-text">${mensaje}</p>`,
     textoGuardar: textoConfirmar,
     onGuardar: async () => {
       await onConfirmar();
     }
   });
   const boton = $('#form-modal [data-guardar]');
-  if (boton) {
+  if (boton && peligro) {
     boton.classList.remove('primary');
     boton.classList.add('danger');
   }
@@ -348,29 +396,32 @@ function confirmar({ titulo, mensaje, textoConfirmar = 'Eliminar', onConfirmar }
 
 function renderInicio() {
   const resumen = state.estado.resumen || {};
+  if (state.vista === 'inicio') {
+    $('#view-subtitle').textContent = `${saludo()} · Marca entradas, pausas y salidas del personal.`;
+  }
   $('#inicio-stats').innerHTML = `
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Personas trabajando en este momento">
       <div class="stat-icon">${ICONOS.usuarios}</div>
       <div class="stat-body">
         <span class="stat-value">${resumen.en_turno ?? 0}</span>
         <span class="stat-label">En turno ahora</span>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Personas en descanso ahora mismo">
       <div class="stat-icon amber">${ICONOS.pausa}</div>
       <div class="stat-body">
         <span class="stat-value">${resumen.en_pausa ?? 0}</span>
         <span class="stat-label">En pausa</span>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Suma de horas de todo el equipo hoy (sin pausas)">
       <div class="stat-icon blue">${ICONOS.reloj}</div>
       <div class="stat-body">
         <span class="stat-value">${formatoHoras(resumen.horas_hoy ?? 0)}</span>
         <span class="stat-label">Horas trabajadas hoy</span>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Turnos iniciados hoy (abiertos y cerrados)">
       <div class="stat-icon violet">${ICONOS.calendario}</div>
       <div class="stat-body">
         <span class="stat-value">${resumen.turnos_hoy ?? 0}</span>
@@ -393,11 +444,16 @@ function renderInicio() {
 
   if (!state.colaboradores.length) {
     contenedor.innerHTML = `
-      <div class="empty-state">
-        ${ICONOS.usuarios}
-        <strong>Aún no hay colaboradores</strong>
-        <p>Agrega a tu equipo para comenzar a registrar entradas, pausas y salidas.</p>
-        <button class="btn primary" type="button" data-ir-colaboradores>Agregar colaborador</button>
+      <div class="welcome-hero">
+        <div class="welcome-icon">${ICONOS.reloj}</div>
+        <h3>¡Bienvenido a TurnoYa!</h3>
+        <p>Lleva el control de las horas de tu equipo en 3 pasos sencillos. Empieza agregando a la primera persona.</p>
+        <div class="steps-mini">
+          <div class="step-item"><span class="step-num">1</span><span>Agrega a tu equipo</span></div>
+          <div class="step-item"><span class="step-num">2</span><span>Marca entradas y salidas</span></div>
+          <div class="step-item"><span class="step-num">3</span><span>Revisa los reportes</span></div>
+        </div>
+        <button class="btn primary" type="button" data-ir-colaboradores><span class="plus">+</span> Agregar mi primer colaborador</button>
       </div>
     `;
     return;
@@ -408,7 +464,7 @@ function renderInicio() {
       <div class="empty-state">
         ${ICONOS.lupa}
         <strong>Sin resultados</strong>
-        <p>No encontramos colaboradores con ese nombre o puesto.</p>
+        <p>No encontramos a nadie con “${escapar(state.busquedaInicio.trim())}”. Revisa cómo está escrito o borra la búsqueda.</p>
       </div>
     `;
     return;
@@ -418,17 +474,14 @@ function renderInicio() {
     .map((colaborador) => tarjetaColaborador(colaborador, activosPorColaborador.get(colaborador.id)))
     .join('');
 
+  aplicarEstilosDinamicos(contenedor);
   actualizarReloj();
 }
 
 function tarjetaColaborador(colaborador, turno) {
   const enPausa = Boolean(turno && turno.en_pausa);
   const clase = turno ? (enPausa ? 'is-paused' : 'is-active') : '';
-  const insignia = turno
-    ? enPausa
-      ? '<span class="badge badge-pause">En pausa</span>'
-      : '<span class="badge badge-on">En turno</span>'
-    : '<span class="badge badge-off">Fuera de turno</span>';
+  const insignia = insigniaEstado(turno);
 
   let acciones = '';
   if (!turno) {
@@ -456,7 +509,7 @@ function tarjetaColaborador(colaborador, turno) {
   return `
     <article class="emp-card ${clase}">
       <div class="emp-head">
-        <div class="avatar">${escapar(iniciales(colaborador.nombre))}</div>
+        ${avatarHTML(colaborador.nombre)}
         <div class="emp-id">
           <h3>${escapar(colaborador.nombre)}</h3>
           <p>${escapar(colaborador.puesto || 'Sin puesto asignado')}</p>
@@ -482,6 +535,54 @@ function tarjetaColaborador(colaborador, turno) {
       <div class="emp-actions">${acciones}</div>
     </article>
   `;
+}
+
+function abrirModalEntradaRapida() {
+  const enTurnoIds = new Set((state.estado.activos || []).map((t) => t.colaborador_id));
+  const disponibles = state.colaboradores.filter((c) => c.activo && !enTurnoIds.has(c.id));
+
+  if (!state.colaboradores.length) {
+    cambiarVista('colaboradores');
+    abrirModalColaborador();
+    return;
+  }
+  if (!disponibles.length) {
+    toast('Todo el personal activo ya está en turno.');
+    return;
+  }
+
+  const opciones = disponibles
+    .map((c) => `<option value="${c.id}">${escapar(c.nombre)}${c.puesto ? ` · ${escapar(c.puesto)}` : ''}</option>`)
+    .join('');
+
+  abrirModal({
+    titulo: 'Marcar entrada rápida',
+    subtitulo: 'Elige quién comienza su jornada ahora mismo.',
+    textoGuardar: 'Marcar entrada',
+    contenido: `
+      <div class="form-grid">
+        <label class="field full">
+          <span>Colaborador <span class="req">*</span></span>
+          <select name="colaborador_id" required>${opciones}</select>
+        </label>
+        <label class="field full">
+          <span>Nota (opcional)</span>
+          <input type="text" name="notas" maxlength="200" placeholder="Ej. Cubre turno de la tarde" autocomplete="off" />
+        </label>
+      </div>
+    `,
+    onGuardar: async (datos) => {
+      const id = Number(datos.get('colaborador_id'));
+      const colab = disponibles.find((c) => c.id === id);
+      await api('/turnos/entrada', {
+        method: 'POST',
+        body: JSON.stringify({ colaborador_id: id, notas: datos.get('notas') })
+      });
+      vibrar(30);
+      toast(`Entrada registrada${colab ? ` para ${colab.nombre}` : ''}.`);
+      await Promise.all([refrescarEstado(true), cargarRegistros(true)]);
+    }
+  });
 }
 
 function duracionTurno(turno) {
@@ -559,7 +660,7 @@ function renderColaboradores() {
         <tr>
           <td>
             <div class="cell-person">
-              <div class="avatar">${escapar(iniciales(colaborador.nombre))}</div>
+              ${avatarHTML(colaborador.nombre)}
               <div>
                 <strong>${escapar(colaborador.nombre)}</strong>
                 <span>${escapar(colaborador.puesto || 'Sin puesto')}</span>
@@ -587,6 +688,7 @@ function renderColaboradores() {
       `;
     })
     .join('');
+  aplicarEstilosDinamicos(cuerpo);
 }
 
 function abrirModalColaborador(colaborador = null) {
@@ -753,9 +855,7 @@ function renderRegistros() {
       totalPausa += turno.pausa_minutos || 0;
 
       const insignia = turno.activo
-        ? turno.en_pausa
-          ? '<span class="badge badge-pause">En pausa</span>'
-          : '<span class="badge badge-on">En turno</span>'
+        ? insigniaEstado(turno)
         : '<span class="badge badge-info">Completado</span>';
 
       let accionesTurno = '';
@@ -782,7 +882,7 @@ function renderRegistros() {
           <td class="cell-mono" data-label="Fecha">${fechaCorta(turno.fecha)}</td>
           <td data-label="Colaborador">
             <div class="cell-person">
-              <div class="avatar">${escapar(iniciales(turno.colaborador_nombre))}</div>
+              ${avatarHTML(turno.colaborador_nombre)}
               <div>
                 <strong>${escapar(turno.colaborador_nombre)}</strong>
                 <span>${escapar(turno.colaborador_puesto || 'Sin puesto')}</span>
@@ -827,6 +927,7 @@ function renderRegistros() {
   if (totalHoras) partes.push(`${formatoHoras(totalHoras)} trabajadas`);
   if (totalPausa) partes.push(`${formatoMinutos(totalPausa)} de pausa`);
   resumen.textContent = partes.join(' · ');
+  aplicarEstilosDinamicos(cuerpo);
 }
 
 function abrirModalRegistro(turno = null) {
@@ -1030,29 +1131,31 @@ function renderReporte() {
   const reporte = state.reporte;
   if (!reporte) return;
 
+  renderResumenReporte(reporte);
+
   $('#reporte-stats').innerHTML = `
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Suma de horas de todos, descontando pausas">
       <div class="stat-icon blue">${ICONOS.reloj}</div>
       <div class="stat-body">
         <span class="stat-value">${formatoHoras(reporte.totales.horas)}</span>
         <span class="stat-label">Horas trabajadas</span>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Horas por encima de la jornada diaria">
       <div class="stat-icon amber">${ICONOS.extra}</div>
       <div class="stat-body">
         <span class="stat-value">${formatoHoras(reporte.totales.extra)}</span>
         <span class="stat-label">Horas extra</span>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Turnos con entrada y salida marcadas">
       <div class="stat-icon">${ICONOS.calendario}</div>
       <div class="stat-body">
         <span class="stat-value">${reporte.totales.turnos}</span>
         <span class="stat-label">Turnos completados</span>
       </div>
     </div>
-    <div class="stat-card">
+    <div class="stat-card" data-tooltip="Personas que trabajaron en este periodo">
       <div class="stat-icon violet">${ICONOS.usuarios}</div>
       <div class="stat-body">
         <span class="stat-value">${reporte.totales.colaboradores}</span>
@@ -1080,7 +1183,7 @@ function renderReporte() {
             <tr>
               <td data-label="Colaborador">
                 <div class="cell-person">
-                  <div class="avatar">${escapar(iniciales(colaborador.colaborador_nombre))}</div>
+                  ${avatarHTML(colaborador.colaborador_nombre)}
                   <div>
                     <strong>${escapar(colaborador.colaborador_nombre)}</strong>
                     <span>${colaborador.turnos} turno${colaborador.turnos === 1 ? '' : 's'}</span>
@@ -1091,8 +1194,17 @@ function renderReporte() {
               <td class="right cell-mono" data-label="Días">${colaborador.dias}</td>
               <td class="right cell-mono" data-label="Turnos">${colaborador.turnos}</td>
               <td class="right cell-mono" data-label="Pausas">${colaborador.pausa_minutos ? formatoMinutos(colaborador.pausa_minutos) : '—'}</td>
-              <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(colaborador.horas)}</strong></td>
-              <td class="right cell-mono" data-label="Horas extra">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
+              <td class="right cell-mono" data-label="Horas">
+                <strong>${formatoHoras(colaborador.horas)}</strong>
+                <div class="progress" title="Horas trabajadas frente a la jornada esperada (${colaborador.dias} día${colaborador.dias === 1 ? '' : 's'} × ${formatoHoras(reporte.umbral)})">
+                  <span class="progress-bar${colaborador.extra ? ' is-over' : ''}" data-pct="${
+                    reporte.umbral && colaborador.dias
+                      ? Math.round((colaborador.horas / (colaborador.dias * reporte.umbral)) * 100)
+                      : 0
+                  }"></span>
+                </div>
+              </td>
+              <td class="right cell-mono${colaborador.extra ? ' cell-extra-on' : ''}" data-label="Horas extra">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
             </tr>
           `
         )
@@ -1125,7 +1237,7 @@ function renderReporte() {
               <td class="right cell-mono" data-label="Turnos">${dia.turnos}</td>
               <td class="right cell-mono" data-label="Pausas">${dia.pausa_minutos ? formatoMinutos(dia.pausa_minutos) : '—'}</td>
               <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(dia.horas)}</strong></td>
-              <td class="right cell-mono" data-label="Horas extra">${dia.extra ? formatoHoras(dia.extra) : '—'}</td>
+              <td class="right cell-mono${dia.extra ? ' cell-extra-on' : ''}" data-label="Horas extra">${dia.extra ? formatoHoras(dia.extra) : '—'}</td>
             </tr>
           `
         )
@@ -1138,6 +1250,36 @@ function renderReporte() {
         formatoHoras(reporte.totales.extra)
       ]);
   }
+  aplicarEstilosDinamicos(cuerpoColabs);
+}
+
+function renderResumenReporte(reporte) {
+  const caja = $('#reporte-resumen-texto');
+  if (!caja) return;
+  const t = reporte.totales;
+  if (!t.turnos) {
+    caja.innerHTML =
+      'No hay turnos terminados entre el <strong>' + escapar(fechaCorta(reporte.desde)) +
+      '</strong> y el <strong>' + escapar(fechaCorta(reporte.hasta)) +
+      '</strong>. Prueba con otro rango de fechas o revisa que se hayan marcado las salidas.';
+    return;
+  }
+  const personas = `${t.colaboradores} persona${t.colaboradores === 1 ? '' : 's'}`;
+  const partes = [
+    `Del <strong>${escapar(fechaCorta(reporte.desde))}</strong> al <strong>${escapar(fechaCorta(reporte.hasta))}</strong>, ` +
+      `tu equipo de <strong>${personas}</strong> trabajó <strong>${formatoHoras(t.horas)}</strong> ` +
+      `en <strong>${t.turnos} turno${t.turnos === 1 ? '' : 's'}</strong>.`
+  ];
+  if (t.extra > 0) {
+    partes.push(`Se acumularon <strong class="cell-extra-on">${formatoHoras(t.extra)} de horas extra</strong> (más de ${formatoHoras(reporte.umbral)} al día).`);
+  } else {
+    partes.push('Nadie superó la jornada diaria: <strong>sin horas extra</strong>. 👍');
+  }
+  const top = reporte.por_colaborador[0];
+  if (top && t.colaboradores > 1) {
+    partes.push(`Quien más horas sumó fue <strong>${escapar(top.colaborador_nombre)}</strong> (${formatoHoras(top.horas)}).`);
+  }
+  caja.innerHTML = partes.join(' ');
 }
 
 function filaTotales(columnas, valores) {
@@ -1513,24 +1655,49 @@ function conectarEventos() {
 
     const accion = boton.dataset.accion;
     const idTurno = boton.dataset.turno;
+
+    if (accion === 'salida') {
+      const turno = (state.estado.activos || []).find((t) => t.id === Number(idTurno));
+      const nombre = turno ? turno.colaborador_nombre : 'este colaborador';
+      confirmar({
+        titulo: 'Marcar salida',
+        icono: ICONOS.reloj,
+        peligro: false,
+        mensaje: `¿Terminar la jornada de <strong>${escapar(nombre)}</strong>?${
+          turno ? `<br />Entró a las <strong>${horaCorta(turno.entrada)}</strong> y lleva <strong>${duracionTurno(turno)}</strong> trabajando.` : ''
+        }`,
+        textoConfirmar: 'Sí, marcar salida',
+        onConfirmar: async () => {
+          await api(`/turnos/${idTurno}/salida`, { method: 'POST' });
+          vibrar(30);
+          toast(`Salida registrada${turno ? ` para ${turno.colaborador_nombre}` : ''}. ¡Buen trabajo!`);
+          await refrescarEstado(true);
+          await cargarRegistros(true);
+          if (state.vista === 'reportes') cargarReporte(true);
+        }
+      });
+      return;
+    }
+
     boton.disabled = true;
 
     try {
       if (accion === 'entrada') {
+        const colaborador = state.colaboradores.find((c) => c.id === Number(boton.dataset.colaborador));
         await api('/turnos/entrada', {
           method: 'POST',
           body: JSON.stringify({ colaborador_id: Number(boton.dataset.colaborador) })
         });
-        toast('Entrada registrada.');
+        vibrar(30);
+        toast(`Entrada registrada${colaborador ? ` para ${colaborador.nombre}` : ''}.`);
       } else if (accion === 'pausa') {
         await api(`/turnos/${idTurno}/pausa/iniciar`, { method: 'POST' });
-        toast('Pausa iniciada.');
+        vibrar();
+        toast('Pausa iniciada. El tiempo de descanso no cuenta como trabajado.');
       } else if (accion === 'reanudar') {
         await api(`/turnos/${idTurno}/pausa/finalizar`, { method: 'POST' });
+        vibrar();
         toast('Pausa finalizada. Turno reanudado.');
-      } else if (accion === 'salida') {
-        await api(`/turnos/${idTurno}/salida`, { method: 'POST' });
-        toast('Salida registrada.');
       }
       await refrescarEstado(true);
       await cargarRegistros(true);
@@ -1552,6 +1719,9 @@ function conectarEventos() {
   });
 
   $('#btn-nuevo-colab').addEventListener('click', () => abrirModalColaborador());
+
+  const fab = $('#btn-fab-entrada');
+  if (fab) fab.addEventListener('click', () => abrirModalEntradaRapida());
 
   $('#tabla-colabs-body').addEventListener('click', (evento) => {
     const boton = evento.target.closest('button[data-accion]');
