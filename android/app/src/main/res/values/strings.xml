@@ -6,9 +6,12 @@
     <string name="setup_label">Dirección del servidor</string>
     <string name="setup_hint">https://turnoya-phi.vercel.app</string>
     <string name="setup_help">Escribe la dirección de TurnoYa en línea. Funciona con datos móviles o cualquier Wi-Fi. Si usas el servidor de la tienda en la red local, escribe su dirección (por ejemplo http://192.168.1.50:3000).</string>
-    <string name="setup_button">Conectar</string>
+    <string name="setup_button">Entrar como Administrador</string>
+    <string name="setup_button_worker">Entrar como Colaborador</string>
     <string name="menu_reload">Recargar</string>
-    <string name="menu_server">Cambiar servidor</string>
+    <string name="menu_worker_mode">Vista Colaborador (/mi-turno)</string>
+    <string name="menu_admin_mode">Vista Administrador</string>
+    <string name="menu_server">Cambiar enlace del servidor</string>
     <string name="menu_browser">Abrir en el navegador</string>
     <string name="error_url">Escribe una dirección válida, por ejemplo https://turnoya-phi.vercel.app</string>
     <string name="error_connect">No se pudo conectar con el servidor. Revisa tu conexión a Internet y que la dirección sea correcta.</string>

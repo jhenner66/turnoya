@@ -114,17 +114,31 @@
                     android:visibility="gone" />
 
                 <Button
-                    android:id="@+id/btn_conectar"
+                    android:id="@+id/btn_conectar_colaborador"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="18dp"
                     android:backgroundTint="@color/brand"
                     android:paddingTop="12dp"
                     android:paddingBottom="12dp"
-                    android:text="@string/setup_button"
+                    android:text="@string/setup_button_worker"
                     android:textAllCaps="false"
                     android:textColor="@android:color/white"
                     android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <Button
+                    android:id="@+id/btn_conectar"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:backgroundTint="@color/surface"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp"
+                    android:text="@string/setup_button"
+                    android:textAllCaps="false"
+                    android:textColor="@color/brand_ink"
+                    android:textSize="15sp"
                     android:textStyle="bold" />
             </LinearLayout>
 

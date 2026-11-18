@@ -4,11 +4,14 @@
         android:id="@+id/accion_recargar"
         android:title="@string/menu_reload" />
     <item
+        android:id="@+id/accion_modo_colaborador"
+        android:title="@string/menu_worker_mode" />
+    <item
+        android:id="@+id/accion_modo_admin"
+        android:title="@string/menu_admin_mode" />
+    <item
         android:id="@+id/accion_servidor"
         android:title="@string/menu_server" />
-    <item
-        android:id="@+id/accion_navegador"
-        android:title="@string/menu_browser" />
     <item
         android:id="@+id/accion_acerca"
         android:title="@string/menu_about" />

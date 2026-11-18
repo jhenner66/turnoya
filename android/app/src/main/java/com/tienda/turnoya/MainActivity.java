@@ -87,21 +87,26 @@ public class MainActivity extends Activity {
 
         String guardada = prefs.getString(KEY_URL, null);
         if (guardada == null || guardada.trim().isEmpty()) {
-            // Primera apertura: se conecta directamente a la versión en línea.
-            guardada = URL_POR_DEFECTO;
-            prefs.edit().putString(KEY_URL, guardada).apply();
+            // Primera apertura: muestra la pantalla para pegar el enlace y elegir modo
+            urlInput.setText(URL_POR_DEFECTO);
+            mostrarSetup(null);
+        } else {
+            urlInput.setText(guardada);
+            cargarServidor(guardada);
         }
-        urlInput.setText(guardada);
-        cargarServidor(guardada);
     }
 
     private void configurarFormulario() {
         Button conectar = findViewById(R.id.btn_conectar);
-        conectar.setOnClickListener(v -> conectarDesdeFormulario());
+        conectar.setOnClickListener(v -> conectarDesdeFormulario(false));
+        Button conectarColab = findViewById(R.id.btn_conectar_colaborador);
+        if (conectarColab != null) {
+            conectarColab.setOnClickListener(v -> conectarDesdeFormulario(true));
+        }
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
             boolean enter = event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER;
             if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE || enter) {
-                conectarDesdeFormulario();
+                conectarDesdeFormulario(false);
                 return true;
             }
             return false;
@@ -210,7 +215,7 @@ public class MainActivity extends Activity {
 
     /* ------------------------- Conexión y errores ------------------------ */
 
-    private void conectarDesdeFormulario() {
+    private void conectarDesdeFormulario(boolean modoColaborador) {
         String normalizada = normalizarUrl(urlInput.getText().toString());
         if (normalizada == null) {
             errorView.setText(R.string.error_url);
@@ -218,10 +223,30 @@ public class MainActivity extends Activity {
             return;
         }
 
+        if (modoColaborador && !normalizada.endsWith("/mi-turno")) {
+            normalizada = urlRaiz(normalizada) + "/mi-turno";
+        } else if (!modoColaborador && normalizada.endsWith("/mi-turno")) {
+            // Si escribió explícitamente /mi-turno y tocó conectar, se respeta,
+            // salvo que use el botón de Administrador sobre la raíz.
+        }
+
         prefs.edit().putString(KEY_URL, normalizada).apply();
         urlInput.setText(normalizada);
         errorView.setVisibility(View.GONE);
         cargarServidor(normalizada);
+    }
+
+    private String urlRaiz(String url) {
+        try {
+            Uri uri = Uri.parse(url);
+            String esquema = uri.getScheme() == null ? "https" : uri.getScheme();
+            String autoridad = uri.getAuthority();
+            if (autoridad != null) {
+                return esquema + "://" + autoridad;
+            }
+        } catch (Exception ignored) {
+        }
+        return url.replaceAll("/mi-turno/?$", "");
     }
 
     private void cargarServidor(String url) {
@@ -327,21 +352,7 @@ public class MainActivity extends Activity {
         String esquema = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
 
         if (esquema.equals("http") || esquema.equals("https")) {
-            String hostActual = null;
-            if (urlActual != null) {
-                try {
-                    hostActual = Uri.parse(urlActual).getHost();
-                } catch (Exception ignored) {
-                    /* sin host conocido */
-                }
-            }
-
-            if (hostActual != null && hostActual.equalsIgnoreCase(uri.getHost())) {
-                return false; // sigue dentro de la app
-            }
-
-            abrirExterno(uri);
-            return true;
+            return false; // siempre abre dentro de la app sin usar el navegador externo
         }
 
         if (esquema.equals("mailto") || esquema.equals("tel")
@@ -477,8 +488,9 @@ public class MainActivity extends Activity {
     public boolean onPrepareOptionsMenu(Menu menu) {
         boolean enWeb = webView.getVisibility() == View.VISIBLE && !errorMostrado;
         menu.findItem(R.id.accion_recargar).setVisible(enWeb);
+        menu.findItem(R.id.accion_modo_colaborador).setVisible(enWeb);
+        menu.findItem(R.id.accion_modo_admin).setVisible(enWeb);
         menu.findItem(R.id.accion_servidor).setVisible(enWeb);
-        menu.findItem(R.id.accion_navegador).setVisible(enWeb);
         return super.onPrepareOptionsMenu(menu);
     }
 
@@ -489,16 +501,21 @@ public class MainActivity extends Activity {
             reintentarCarga();
             return true;
         }
-        if (id == R.id.accion_servidor) {
-            mostrarSetup(null);
+        if (id == R.id.accion_modo_colaborador) {
+            String base = urlRaiz(urlActual != null ? urlActual : URL_POR_DEFECTO);
+            String destino = base + "/mi-turno";
+            prefs.edit().putString(KEY_URL, destino).apply();
+            cargarServidor(destino);
             return true;
         }
-        if (id == R.id.accion_navegador) {
-            String url = webView.getUrl();
-            if (url == null || url.isEmpty()) url = urlActual;
-            if (url != null) {
-                abrirExterno(Uri.parse(url));
-            }
+        if (id == R.id.accion_modo_admin) {
+            String destino = urlRaiz(urlActual != null ? urlActual : URL_POR_DEFECTO);
+            prefs.edit().putString(KEY_URL, destino).apply();
+            cargarServidor(destino);
+            return true;
+        }
+        if (id == R.id.accion_servidor) {
+            mostrarSetup(null);
             return true;
         }
         if (id == R.id.accion_acerca) {
