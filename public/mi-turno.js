@@ -4,6 +4,8 @@ const $ = (selector, raiz = document) => raiz.querySelector(selector);
 const $$ = (selector, raiz = document) => [...raiz.querySelectorAll(selector)];
 
 const CLAVE_PERSONA = 'turnoya_colaborador_id';
+const CLAVE_COLA = 'turnoya_cola_offline';
+const CLAVE_CACHE = 'turnoya_cache_colaborador';
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 
@@ -71,8 +73,15 @@ function vibrar(ms = 20) {
 
 let servidorHoy = null;
 
-function fechaLocalISO(fecha) {
+function fechaLocalISO(fecha = new Date()) {
   return `${fecha.getFullYear()}-${pad2(fecha.getMonth() + 1)}-${pad2(fecha.getDate())}`;
+}
+
+function fechaHoraLocalISO(fecha = new Date()) {
+  return (
+    `${fecha.getFullYear()}-${pad2(fecha.getMonth() + 1)}-${pad2(fecha.getDate())}` +
+    `T${pad2(fecha.getHours())}:${pad2(fecha.getMinutes())}:${pad2(fecha.getSeconds())}`
+  );
 }
 
 function hoyISO() {
@@ -91,6 +100,13 @@ function parseLocal(iso) {
   const [horas, minutos, segundos] = parteHora.split(':').map(Number);
   const fecha = new Date(anio, mes - 1, dia, horas || 0, minutos || 0, segundos || 0);
   return Number.isNaN(fecha.getTime()) ? null : fecha;
+}
+
+function minutosEntreLocal(desdeISO, hastaISO) {
+  const d = parseLocal(desdeISO);
+  const h = parseLocal(hastaISO);
+  if (!d || !h) return 0;
+  return Math.max(0, (h - d) / 60000);
 }
 
 function horaCorta(iso) {
@@ -145,17 +161,79 @@ function duracionDesdeDatos({ entrada, pausaMin, pausaInicio }) {
 
 function insigniaEstado(turno) {
   if (!turno) return '<span class="badge badge-off">Fuera de turno</span>';
-  if (turno.en_pausa) return `<span class="badge badge-pause has-icon">${ICONO_PAUSA_MINI}En pausa</span>`;
-  return '<span class="badge badge-on">En turno</span>';
+  const sufijoOffline = turno.pendiente_offline ? ' · ☁️' : '';
+  if (turno.en_pausa) {
+    return `<span class="badge badge-pause has-icon">${ICONO_PAUSA_MINI}En pausa${sufijoOffline}</span>`;
+  }
+  return `<span class="badge badge-on">En turno${sufijoOffline}</span>`;
 }
 
+/* ================================================================
+   Cola Offline y Caché en el Teléfono
+   ================================================================ */
+
+function leerColaOffline() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_COLA);
+    const lista = crudo ? JSON.parse(crudo) : [];
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function guardarColaOffline(lista) {
+  try {
+    localStorage.setItem(CLAVE_COLA, JSON.stringify(lista));
+  } catch { /* memoria llena */ }
+  actualizarBannerCola();
+}
+
+function encolarAccionOffline(accion) {
+  const cola = leerColaOffline();
+  cola.push({
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    ...accion
+  });
+  guardarColaOffline(cola);
+}
+
+function leerCacheLocal() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_CACHE);
+    return crudo ? JSON.parse(crudo) : null;
+  } catch {
+    return null;
+  }
+}
+
+function guardarCacheLocal() {
+  try {
+    localStorage.setItem(
+      CLAVE_CACHE,
+      JSON.stringify({
+        config: state.config,
+        colaboradores: state.colaboradores,
+        estadoServidor: state.estadoServidor,
+        reporte: state.reporte,
+        registrosServidor: state.registrosServidor
+      })
+    );
+  } catch { /* ignorar */ }
+}
+
+const cacheInicial = leerCacheLocal();
+
 const state = {
-  online: true,
+  online: navigator.onLine !== false,
+  sincronizando: false,
   colaboradorId: Number(localStorage.getItem(CLAVE_PERSONA)) || null,
-  colaboradores: [],
+  colaboradores: (cacheInicial && cacheInicial.colaboradores) || [],
+  estadoServidor: (cacheInicial && cacheInicial.estadoServidor) || { activos: [], resumen: {} },
   estado: { activos: [], resumen: {} },
-  config: { nombre_tienda: 'Mi Tienda', jornada_horas: '8' },
-  reporte: null,
+  config: (cacheInicial && cacheInicial.config) || { nombre_tienda: 'Mi Tienda', jornada_horas: '8' },
+  reporte: (cacheInicial && cacheInicial.reporte) || null,
+  registrosServidor: (cacheInicial && cacheInicial.registrosServidor) || [],
   registros: [],
   tabMovil: 'jornada',
   busqueda: '',
@@ -163,9 +241,157 @@ const state = {
   hasta: hoyISO()
 };
 
+// Aplica los marcajes pendientes en el teléfono sobre el último estado conocido del servidor,
+// para que el colaborador vea su turno actualizado al instante aunque no tenga Internet.
+function recomputarEstadoConCola() {
+  const cola = leerColaOffline();
+  const activosMap = new Map();
+  for (const t of (state.estadoServidor.activos || [])) {
+    activosMap.set(t.colaborador_id, { ...t });
+  }
+
+  const turnosCerradosOffline = [];
+
+  for (const item of cola) {
+    const colabId = Number(item.colaborador_id);
+    const colab = state.colaboradores.find((c) => c.id === colabId);
+    const actual = activosMap.get(colabId);
+
+    if (item.tipo === 'entrada' && !actual) {
+      activosMap.set(colabId, {
+        id: `offline-${item.id}`,
+        colaborador_id: colabId,
+        colaborador_nombre: colab ? colab.nombre : 'Colaborador',
+        colaborador_puesto: colab ? colab.puesto : '',
+        fecha: item.momento.slice(0, 10),
+        entrada: item.momento,
+        salida: null,
+        pausa_inicio: null,
+        pausa_minutos: 0,
+        notas: item.notas || '',
+        horas: null,
+        activo: true,
+        en_pausa: false,
+        pendiente_offline: true
+      });
+    } else if (item.tipo === 'pausa' && actual && !actual.en_pausa) {
+      actual.pausa_inicio = item.momento;
+      actual.en_pausa = true;
+      actual.pendiente_offline = true;
+    } else if (item.tipo === 'reanudar' && actual && actual.en_pausa) {
+      actual.pausa_minutos =
+        Number(actual.pausa_minutos || 0) +
+        minutosEntreLocal(actual.pausa_inicio, item.momento);
+      actual.pausa_inicio = null;
+      actual.en_pausa = false;
+      actual.pendiente_offline = true;
+    } else if (item.tipo === 'salida' && actual) {
+      let pausaMin = Number(actual.pausa_minutos || 0);
+      if (actual.pausa_inicio) {
+        pausaMin += minutosEntreLocal(actual.pausa_inicio, item.momento);
+      }
+      const horas = Math.max(
+        0,
+        minutosEntreLocal(actual.entrada, item.momento) / 60 - pausaMin / 60
+      );
+      turnosCerradosOffline.unshift({
+        ...actual,
+        salida: item.momento,
+        pausa_inicio: null,
+        pausa_minutos: Math.round(pausaMin * 100) / 100,
+        horas: Math.round(horas * 100) / 100,
+        activo: false,
+        en_pausa: false,
+        pendiente_offline: true
+      });
+      activosMap.delete(colabId);
+    }
+  }
+
+  state.estado = {
+    ...state.estadoServidor,
+    activos: [...activosMap.values()]
+  };
+
+  // Combina los registros del servidor con los turnos creados/modificados sin conexión
+  const baseRegistros = (state.registrosServidor || []).filter((r) => {
+    if (r.colaborador_id !== state.colaboradorId) return false;
+    // Si era el turno abierto que ahora se cerró o sigue en activosMap, usamos la versión proyectada
+    if (!r.salida) return false;
+    return true;
+  });
+
+  const mioActivo = activosMap.get(state.colaboradorId);
+  const miosCerradosOffline = turnosCerradosOffline.filter(
+    (t) => t.colaborador_id === state.colaboradorId
+  );
+
+  state.registros = [
+    ...(mioActivo ? [mioActivo] : []),
+    ...miosCerradosOffline,
+    ...baseRegistros
+  ];
+}
+
+function actualizarBannerCola() {
+  const cola = leerColaOffline();
+  const banner = $('#sync-banner');
+  const texto = $('#sync-text');
+  if (!banner || !texto) return;
+
+  if (!cola.length) {
+    banner.classList.add('hidden');
+    return;
+  }
+
+  banner.classList.remove('hidden');
+  const n = cola.length;
+  texto.textContent = state.sincronizando
+    ? `Subiendo ${n} marcaje${n === 1 ? '' : 's'} guardado${n === 1 ? '' : 's'} al servidor…`
+    : `☁️ ${n} marcaje${n === 1 ? '' : 's'} guardado${n === 1 ? '' : 's'} en tu teléfono · Se subirá${n === 1 ? '' : 'n'} automáticamente al volver Internet.`;
+}
+
+async function sincronizarColaOffline(silencioso = false) {
+  const cola = leerColaOffline();
+  if (!cola.length || state.sincronizando) return false;
+
+  state.sincronizando = true;
+  actualizarBannerCola();
+  const boton = $('#btn-sincronizar-ahora');
+  if (boton) boton.disabled = true;
+
+  try {
+    await api('/sincronizar', {
+      method: 'POST',
+      body: JSON.stringify({ acciones: cola })
+    });
+    guardarColaOffline([]);
+    toast(`✓ ${cola.length === 1 ? 'Marcaje pendiente subido' : `${cola.length} marcajes pendientes subidos`} al servidor.`);
+    await cargarTodo();
+    return true;
+  } catch (error) {
+    if (!silencioso) {
+      toast('Todavía no hay conexión. Tus marcajes siguen seguros en el teléfono.', 'error');
+    }
+    return false;
+  } finally {
+    state.sincronizando = false;
+    if (boton) boton.disabled = false;
+    actualizarBannerCola();
+  }
+}
+
+/* ================================================================
+   Comunicación con el servidor
+   ================================================================ */
+
+function esErrorDeRed(error) {
+  return Boolean(error && error.esOffline);
+}
+
 async function api(ruta, opciones = {}) {
   const controlador = new AbortController();
-  const temporizador = setTimeout(() => controlador.abort(), 15000);
+  const temporizador = setTimeout(() => controlador.abort(), 12000);
   const config = {
     ...opciones,
     headers: { ...(opciones.headers || {}) },
@@ -184,7 +410,9 @@ async function api(ruta, opciones = {}) {
     }
     if ([502, 503, 504].includes(respuesta.status)) {
       marcarConexion(false);
-      throw new Error('No se pudo conectar con el servidor.');
+      const err = new Error('Sin conexión con el servidor.');
+      err.esOffline = true;
+      throw err;
     }
     marcarConexion(true);
     if (!respuesta.ok) {
@@ -194,7 +422,9 @@ async function api(ruta, opciones = {}) {
   } catch (error) {
     if (error && (error.name === 'AbortError' || error instanceof TypeError)) {
       marcarConexion(false);
-      throw new Error('No se pudo conectar con el servidor. Verifica tu conexión.');
+      const err = new Error('Sin conexión con el servidor.');
+      err.esOffline = true;
+      throw err;
     }
     throw error;
   } finally {
@@ -207,7 +437,12 @@ function marcarConexion(online) {
   state.online = Boolean(online);
   const banner = $('#connection-banner');
   if (banner) banner.classList.toggle('hidden', state.online);
-  if (state.online && estabaOffline) toast('Conexión restablecida.');
+  if (state.online && estabaOffline) {
+    toast('Conexión restablecida.');
+    if (leerColaOffline().length) {
+      sincronizarColaOffline(true);
+    }
+  }
 }
 
 function toast(mensaje, tipo = 'ok') {
@@ -221,7 +456,7 @@ function toast(mensaje, tipo = 'ok') {
   setTimeout(() => {
     el.classList.add('leaving');
     setTimeout(() => el.remove(), 220);
-  }, 3200);
+  }, 3600);
 }
 
 function confirmarSalida({ nombre, turno, onConfirmar }) {
@@ -271,6 +506,9 @@ function turnoActivoActual() {
 }
 
 function render() {
+  recomputarEstadoConCola();
+  actualizarBannerCola();
+
   const persona = colaboradorActual();
   const seleccion = $('#vista-seleccion');
   const panel = $('#vista-panel');
@@ -291,6 +529,7 @@ function render() {
   btnCambiar.classList.remove('hidden');
   panel.dataset.tab = state.tabMovil;
   renderJornada(persona);
+  renderMisRegistros(state.registros);
 }
 
 function renderListaPersonas() {
@@ -308,8 +547,8 @@ function renderListaPersonas() {
     contenedor.innerHTML = `
       <div class="empty-state">
         ${ICONOS.usuarios}
-        <strong>${state.colaboradores.length ? 'No encontramos tu nombre' : 'Aún no hay colaboradores registrados'}</strong>
-        <p>${state.colaboradores.length ? 'Prueba buscando con otras letras.' : 'Pídele al encargado de la tienda que te agregue en el sistema.'}</p>
+        <strong>${state.colaboradores.length ? 'No encontramos tu nombre' : 'Sin conexión para cargar la lista'}</strong>
+        <p>${state.colaboradores.length ? 'Prueba buscando con otras letras.' : 'Conéctate a Internet una primera vez para descargar la lista del equipo.'}</p>
       </div>
     `;
     return;
@@ -413,6 +652,81 @@ function renderJornada(persona) {
   actualizarReloj();
 }
 
+async function ejecutarOEncolarMarcaje({ tipo, turnoId, notas = '' }) {
+  const persona = colaboradorActual();
+  if (!persona) return;
+  const momento = fechaHoraLocalISO(new Date());
+  const nombreCorto = persona.nombre.split(' ')[0];
+
+  // Si ya hay marcajes previos en cola para este colaborador o el turno actual fue creado offline,
+  // encolamos también este marcaje para respetar el orden cronológico exacto, e intentamos subir toda la cola.
+  const hayColaPrevia = leerColaOffline().some((item) => Number(item.colaborador_id) === persona.id);
+  const esTurnoOffline = String(turnoId || '').startsWith('offline-');
+
+  if (!hayColaPrevia && !esTurnoOffline) {
+    try {
+      if (tipo === 'entrada') {
+        await api('/turnos/entrada', {
+          method: 'POST',
+          body: JSON.stringify({ colaborador_id: persona.id, momento, notas })
+        });
+        vibrar(30);
+        toast(`¡Buen turno, ${nombreCorto}! Entrada registrada.`);
+      } else if (tipo === 'pausa') {
+        await api(`/turnos/${turnoId}/pausa/iniciar`, {
+          method: 'POST',
+          body: JSON.stringify({ momento })
+        });
+        vibrar();
+        toast('Pausa iniciada. ¡Buen descanso!');
+      } else if (tipo === 'reanudar') {
+        await api(`/turnos/${turnoId}/pausa/finalizar`, {
+          method: 'POST',
+          body: JSON.stringify({ momento })
+        });
+        vibrar();
+        toast('Turno reanudado.');
+      } else if (tipo === 'salida') {
+        await api(`/turnos/${turnoId}/salida`, {
+          method: 'POST',
+          body: JSON.stringify({ momento })
+        });
+        vibrar(35);
+        toast(`¡Hasta luego, ${nombreCorto}! Salida registrada.`);
+      }
+      await Promise.all([refrescarEstado(true), cargarMisDatos(true)]);
+      return;
+    } catch (error) {
+      if (!esErrorDeRed(error)) {
+        throw error;
+      }
+      // Si falló por falta de Internet, cae al guardado offline de abajo
+    }
+  }
+
+  encolarAccionOffline({
+    colaborador_id: persona.id,
+    tipo,
+    momento,
+    notas
+  });
+  vibrar(30);
+  render();
+
+  if (hayColaPrevia && state.online) {
+    await sincronizarColaOffline(true);
+    return;
+  }
+
+  const mensajesOffline = {
+    entrada: `☁️ Entrada (${horaCorta(momento)}) guardada en tu teléfono. Se subirá al volver Internet.`,
+    pausa: `☁️ Pausa (${horaCorta(momento)}) guardada en tu teléfono. Se subirá al volver Internet.`,
+    reanudar: `☁️ Reanudación (${horaCorta(momento)}) guardada en tu teléfono.`,
+    salida: `☁️ Salida (${horaCorta(momento)}) guardada en tu teléfono. Se subirá al volver Internet.`
+  };
+  toast(mensajesOffline[tipo] || '☁️ Marcaje guardado en el teléfono.');
+}
+
 async function cargarMisDatos(silencioso = false) {
   const persona = colaboradorActual();
   if (!persona) return;
@@ -429,11 +743,16 @@ async function cargarMisDatos(silencioso = false) {
       api(`/turnos?${params.toString()}`)
     ]);
     state.reporte = reporte;
-    state.registros = registros;
-    renderMiResumen(persona, reporte);
-    renderMisRegistros(registros);
+    state.registrosServidor = registros;
+    guardarCacheLocal();
+    recomputarEstadoConCola();
+    renderMiResumen(persona, state.reporte);
+    renderMisRegistros(state.registros);
   } catch (error) {
-    if (!silencioso) toast(error.message, 'error');
+    recomputarEstadoConCola();
+    if (state.reporte) renderMiResumen(persona, state.reporte);
+    renderMisRegistros(state.registros);
+    if (!silencioso && !esErrorDeRed(error)) toast(error.message, 'error');
   }
 }
 
@@ -489,6 +808,7 @@ function renderMisRegistros(registros) {
   const cuerpo = $('#mis-registros-body');
   const pie = $('#mis-registros-foot');
   const nota = $('#mis-registros-nota');
+  if (!cuerpo || !pie || !nota) return;
 
   if (!registros.length) {
     cuerpo.innerHTML = `
@@ -518,7 +838,9 @@ function renderMisRegistros(registros) {
       const extraDia = porDiaExtra.get(turno.id) || 0;
       const insignia = turno.activo
         ? insigniaEstado(turno)
-        : '<span class="badge badge-info">Completado</span>';
+        : turno.pendiente_offline
+          ? '<span class="badge badge-pause">☁️ Pendiente de subir</span>'
+          : '<span class="badge badge-info">Completado</span>';
 
       return `
         <tr>
@@ -621,7 +943,8 @@ async function cargarTodo() {
 
   state.config = config;
   state.colaboradores = colaboradores;
-  state.estado = estado;
+  state.estadoServidor = estado;
+  guardarCacheLocal();
 
   if (estado && estado.fecha) {
     servidorHoy = estado.fecha;
@@ -648,10 +971,12 @@ async function cargarTodo() {
 
 async function refrescarEstado(silencioso = false) {
   try {
-    state.estado = await api('/estado');
+    state.estadoServidor = await api('/estado');
+    guardarCacheLocal();
     render();
   } catch (err) {
-    if (!silencioso) toast(err.message, 'error');
+    render();
+    if (!silencioso && !esErrorDeRed(err)) toast(err.message, 'error');
   }
 }
 
@@ -700,10 +1025,7 @@ function conectarEventos() {
         nombre: persona.nombre,
         turno,
         onConfirmar: async () => {
-          await api(`/turnos/${idTurno}/salida`, { method: 'POST' });
-          vibrar(35);
-          toast(`¡Hasta luego, ${persona.nombre.split(' ')[0]}! Salida registrada.`);
-          await Promise.all([refrescarEstado(true), cargarMisDatos(true)]);
+          await ejecutarOEncolarMarcaje({ tipo: 'salida', turnoId: idTurno });
         }
       });
       return;
@@ -711,28 +1033,13 @@ function conectarEventos() {
 
     boton.disabled = true;
     try {
-      if (accion === 'entrada') {
-        const inputNota = $('#input-nota-entrada');
-        const notas = inputNota ? inputNota.value : '';
-        await api('/turnos/entrada', {
-          method: 'POST',
-          body: JSON.stringify({ colaborador_id: persona.id, notas })
-        });
-        if (inputNota) inputNota.value = '';
-        vibrar(30);
-        toast(`¡Buen turno, ${persona.nombre.split(' ')[0]}! Entrada registrada.`);
-      } else if (accion === 'pausa') {
-        await api(`/turnos/${idTurno}/pausa/iniciar`, { method: 'POST' });
-        vibrar();
-        toast('Pausa iniciada. ¡Buen descanso!');
-      } else if (accion === 'reanudar') {
-        await api(`/turnos/${idTurno}/pausa/finalizar`, { method: 'POST' });
-        vibrar();
-        toast('Turno reanudado.');
-      }
-      await Promise.all([refrescarEstado(true), cargarMisDatos(true)]);
+      const inputNota = $('#input-nota-entrada');
+      const notas = accion === 'entrada' && inputNota ? inputNota.value : '';
+      await ejecutarOEncolarMarcaje({ tipo: accion, turnoId: idTurno, notas });
+      if (accion === 'entrada' && inputNota) inputNota.value = '';
     } catch (err) {
       toast(err.message, 'error');
+    } finally {
       boton.disabled = false;
     }
   });
@@ -768,33 +1075,67 @@ function conectarEventos() {
   $('#btn-reintentar-conexion').addEventListener('click', async () => {
     try {
       await api('/salud');
+      await sincronizarColaOffline(true);
       await cargarTodo();
-      toast('Datos actualizados.');
+      toast('Conexión sincronizada.');
     } catch (err) {
-      toast(err.message, 'error');
+      toast('Sigue sin Internet. Tus marcajes están guardados en el teléfono.', 'error');
     }
   });
+
+  const btnSync = $('#btn-sincronizar-ahora');
+  if (btnSync) {
+    btnSync.addEventListener('click', () => sincronizarColaOffline(false));
+  }
+
+  window.addEventListener('online', async () => {
+    marcarConexion(true);
+    await sincronizarColaOffline(true);
+    await cargarTodo().catch(() => {});
+  });
+
+  window.addEventListener('offline', () => marcarConexion(false));
 }
 
 async function iniciar() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+
   $('#filtro-desde').value = state.desde;
   $('#filtro-hasta').value = state.hasta;
   conectarEventos();
   actualizarReloj();
   setInterval(actualizarReloj, 1000);
 
+  // Renderiza de inmediato con la caché local del teléfono por si no hay Internet
+  if (state.colaboradores.length) {
+    const nombreTienda = state.config.nombre_tienda || 'Mi Tienda';
+    $('#worker-store').textContent = nombreTienda;
+    render();
+    const persona = colaboradorActual();
+    if (persona && state.reporte) renderMiResumen(persona, state.reporte);
+  }
+
   try {
+    if (leerColaOffline().length) {
+      await sincronizarColaOffline(true);
+    }
     await cargarTodo();
   } catch (err) {
     marcarConexion(false);
-    toast(err.message, 'error');
+    render();
   }
 
-  setInterval(() => {
-    if (document.visibilityState === 'visible') {
+  // Reintenta subir marcajes pendientes automáticamente cada 10 segundos
+  setInterval(async () => {
+    if (document.visibilityState !== 'visible') return;
+    if (leerColaOffline().length) {
+      await sincronizarColaOffline(true);
+    } else if (state.online) {
       refrescarEstado(true);
     }
-  }, 25000);
+  }, 10000);
 }
 
 document.addEventListener('DOMContentLoaded', iniciar);

@@ -1664,7 +1664,47 @@ async function aplicarRangoRapido(destino, tipo) {
   }
 }
 
+const CLAVE_COLA_OFFLINE = 'turnoya_cola_offline';
+
+function fechaHoraLocalISO(fecha = new Date()) {
+  return (
+    `${fecha.getFullYear()}-${pad2(fecha.getMonth() + 1)}-${pad2(fecha.getDate())}` +
+    `T${pad2(fecha.getHours())}:${pad2(fecha.getMinutes())}:${pad2(fecha.getSeconds())}`
+  );
+}
+
+function leerColaOffline() {
+  try {
+    const lista = JSON.parse(localStorage.getItem(CLAVE_COLA_OFFLINE) || '[]');
+    return Array.isArray(lista) ? lista : [];
+  } catch {
+    return [];
+  }
+}
+
+function encolarOffline(item) {
+  try {
+    const cola = leerColaOffline();
+    cola.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, ...item });
+    localStorage.setItem(CLAVE_COLA_OFFLINE, JSON.stringify(cola));
+  } catch { /* ignorar */ }
+}
+
+async function subirColaOffline() {
+  const cola = leerColaOffline();
+  if (!cola.length) return;
+  await api('/sincronizar', {
+    method: 'POST',
+    body: JSON.stringify({ acciones: cola })
+  });
+  localStorage.setItem(CLAVE_COLA_OFFLINE, '[]');
+  toast(`✓ ${cola.length === 1 ? '1 marcaje pendiente subido' : `${cola.length} marcajes pendientes subidos`} al servidor.`);
+}
+
 async function cargarTodo() {
+  if (leerColaOffline().length) {
+    await subirColaOffline().catch(() => {});
+  }
   const [config, colaboradores, info, estado] = await Promise.all([
     api('/config'),
     api('/colaboradores'),
@@ -1801,34 +1841,54 @@ function conectarEventos() {
         }`,
         textoConfirmar: 'Sí, marcar salida',
         onConfirmar: async () => {
-          await api(`/turnos/${idTurno}/salida`, { method: 'POST' });
-          vibrar(30);
-          toast(`Salida registrada${turno ? ` para ${turno.colaborador_nombre}` : ''}. ¡Buen trabajo!`);
-          await refrescarEstado(true);
-          await cargarRegistros(true);
-          if (state.vista === 'reportes') cargarReporte(true);
+          const momento = fechaHoraLocalISO(new Date());
+          try {
+            await api(`/turnos/${idTurno}/salida`, {
+              method: 'POST',
+              body: JSON.stringify({ momento })
+            });
+            vibrar(30);
+            toast(`Salida registrada${turno ? ` para ${turno.colaborador_nombre}` : ''}. ¡Buen trabajo!`);
+            await refrescarEstado(true);
+            await cargarRegistros(true);
+            if (state.vista === 'reportes') cargarReporte(true);
+          } catch (err) {
+            if (!state.online && turno) {
+              encolarOffline({ colaborador_id: turno.colaborador_id, tipo: 'salida', momento });
+              toast(`☁️ Salida (${horaCorta(momento)}) guardada en este dispositivo. Se subirá al volver Internet.`);
+              return;
+            }
+            throw err;
+          }
         }
       });
       return;
     }
 
     boton.disabled = true;
+    const momento = fechaHoraLocalISO(new Date());
 
     try {
       if (accion === 'entrada') {
         const colaborador = state.colaboradores.find((c) => c.id === Number(boton.dataset.colaborador));
         await api('/turnos/entrada', {
           method: 'POST',
-          body: JSON.stringify({ colaborador_id: Number(boton.dataset.colaborador) })
+          body: JSON.stringify({ colaborador_id: Number(boton.dataset.colaborador), momento })
         });
         vibrar(30);
         toast(`Entrada registrada${colaborador ? ` para ${colaborador.nombre}` : ''}.`);
       } else if (accion === 'pausa') {
-        await api(`/turnos/${idTurno}/pausa/iniciar`, { method: 'POST' });
+        await api(`/turnos/${idTurno}/pausa/iniciar`, {
+          method: 'POST',
+          body: JSON.stringify({ momento })
+        });
         vibrar();
         toast('Pausa iniciada. El tiempo de descanso no cuenta como trabajado.');
       } else if (accion === 'reanudar') {
-        await api(`/turnos/${idTurno}/pausa/finalizar`, { method: 'POST' });
+        await api(`/turnos/${idTurno}/pausa/finalizar`, {
+          method: 'POST',
+          body: JSON.stringify({ momento })
+        });
         vibrar();
         toast('Pausa finalizada. Turno reanudado.');
       }
@@ -1836,6 +1896,18 @@ function conectarEventos() {
       await cargarRegistros(true);
       if (state.vista === 'reportes') cargarReporte(true);
     } catch (error) {
+      if (!state.online) {
+        const turnoActual = (state.estado.activos || []).find((t) => t.id === Number(idTurno));
+        const colabId = accion === 'entrada'
+          ? Number(boton.dataset.colaborador)
+          : turnoActual && turnoActual.colaborador_id;
+        if (colabId) {
+          encolarOffline({ colaborador_id: colabId, tipo: accion, momento });
+          toast(`☁️ Marcaje (${horaCorta(momento)}) guardado en el dispositivo. Se subirá al volver Internet.`);
+          boton.disabled = false;
+          return;
+        }
+      }
       toast(error.message, 'error');
       boton.disabled = false;
     }
@@ -2069,6 +2141,9 @@ function aplicarFechasPorDefecto() {
    ================================================================ */
 
 async function iniciar() {
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
   aplicarFechasPorDefecto();
   conectarEventos();
   actualizarReloj();

@@ -474,6 +474,15 @@ app.get(
   })
 );
 
+function leerMomentoOpcional(valor) {
+  if (!valor) return aISOlocal();
+  try {
+    return normalizarFechaHora(valor, 'fecha y hora del marcaje');
+  } catch {
+    return aISOlocal();
+  }
+}
+
 app.post(
   '/api/turnos/entrada',
   ruta(async (req, res) => {
@@ -490,10 +499,10 @@ app.post(
       throw new HttpError(409, 'Este colaborador ya tiene un turno abierto.');
     }
 
-    const ahora = aISOlocal();
+    const ahora = leerMomentoOpcional(req.body.momento);
     const info = await ejecutar(
       'INSERT INTO turnos (colaborador_id, fecha, entrada, notas, creado_en) VALUES (?, ?, ?, ?, ?)',
-      [colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500), ahora]
+      [colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500), aISOlocal()]
     );
 
     res.status(201).json(mapearTurno(await obtenerTurno(info.lastInsertRowid)));
@@ -511,7 +520,7 @@ app.post(
     }
 
     await ejecutar('UPDATE turnos SET pausa_inicio = ? WHERE id = ?', [
-      aISOlocal(),
+      leerMomentoOpcional(req.body.momento),
       turno.id
     ]);
     res.json(mapearTurno(await obtenerTurno(turno.id)));
@@ -527,7 +536,8 @@ app.post(
       throw new HttpError(409, 'No hay una pausa en curso.');
     }
 
-    const minutos = minutosEntre(turno.pausa_inicio, aISOlocal());
+    const momento = leerMomentoOpcional(req.body.momento);
+    const minutos = minutosEntre(turno.pausa_inicio, momento);
     await ejecutar(
       'UPDATE turnos SET pausa_inicio = NULL, pausa_minutos = pausa_minutos + ? WHERE id = ?',
       [minutos, turno.id]
@@ -544,7 +554,7 @@ app.post(
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (turno.salida) throw new HttpError(409, 'El turno ya está cerrado.');
 
-    const ahora = aISOlocal();
+    const ahora = leerMomentoOpcional(req.body.momento);
     let pausaMinutos = Number(turno.pausa_minutos || 0);
     if (turno.pausa_inicio) {
       pausaMinutos += minutosEntre(turno.pausa_inicio, ahora);
@@ -558,6 +568,67 @@ app.post(
     );
 
     res.json(mapearTurno(await obtenerTurno(turno.id)));
+  })
+);
+
+// Sincroniza en orden cronológico los marcajes guardados cuando el teléfono no tenía Internet.
+app.post(
+  '/api/sincronizar',
+  ruta(async (req, res) => {
+    const lista = Array.isArray(req.body.acciones) ? req.body.acciones.slice(0, 100) : [];
+    let aplicadas = 0;
+
+    for (const item of lista) {
+      const colaboradorId = Number(item && item.colaborador_id);
+      if (!Number.isInteger(colaboradorId) || colaboradorId <= 0) continue;
+
+      const colaborador = await uno('SELECT * FROM colaboradores WHERE id = ?', [colaboradorId]);
+      if (!colaborador) continue;
+
+      const tipo = String(item.tipo || '');
+      const momento = leerMomentoOpcional(item.momento);
+      const abierto = await uno(
+        'SELECT * FROM turnos WHERE colaborador_id = ? AND salida IS NULL ORDER BY id DESC LIMIT 1',
+        [colaboradorId]
+      );
+
+      if (tipo === 'entrada') {
+        if (!abierto) {
+          await ejecutar(
+            'INSERT INTO turnos (colaborador_id, fecha, entrada, notas, creado_en) VALUES (?, ?, ?, ?, ?)',
+            [colaboradorId, momento.slice(0, 10), momento, texto(item.notas, 500), aISOlocal()]
+          );
+          aplicadas += 1;
+        }
+      } else if (tipo === 'pausa' && abierto && !abierto.pausa_inicio) {
+        const inicioPausa = momento > abierto.entrada ? momento : abierto.entrada;
+        await ejecutar('UPDATE turnos SET pausa_inicio = ? WHERE id = ?', [
+          inicioPausa,
+          abierto.id
+        ]);
+        aplicadas += 1;
+      } else if (tipo === 'reanudar' && abierto && abierto.pausa_inicio) {
+        const minutos = minutosEntre(abierto.pausa_inicio, momento);
+        await ejecutar(
+          'UPDATE turnos SET pausa_inicio = NULL, pausa_minutos = pausa_minutos + ? WHERE id = ?',
+          [minutos, abierto.id]
+        );
+        aplicadas += 1;
+      } else if (tipo === 'salida' && abierto) {
+        const salidaISO = momento > abierto.entrada ? momento : aISOlocal();
+        let pausaMinutos = Number(abierto.pausa_minutos || 0);
+        if (abierto.pausa_inicio) {
+          pausaMinutos += minutosEntre(abierto.pausa_inicio, salidaISO);
+        }
+        await ejecutar(
+          'UPDATE turnos SET salida = ?, pausa_inicio = NULL, pausa_minutos = ? WHERE id = ?',
+          [salidaISO, redondear(pausaMinutos), abierto.id]
+        );
+        aplicadas += 1;
+      }
+    }
+
+    res.json({ ok: true, aplicadas });
   })
 );
 

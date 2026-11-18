@@ -258,10 +258,9 @@ public class MainActivity extends Activity {
         invalidateOptionsMenu();
         actualizarSubtitulo();
 
-        if (!hayRed()) {
-            mostrarError(getString(R.string.error_network));
-            return;
-        }
+        webView.getSettings().setCacheMode(
+            hayRed() ? WebSettings.LOAD_DEFAULT : WebSettings.LOAD_CACHE_ELSE_NETWORK
+        );
 
         progressBar.setProgress(0);
         progressBar.setVisibility(View.VISIBLE);

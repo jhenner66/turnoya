@@ -47,8 +47,17 @@
         <path d="M12 9v4"></path><path d="M12 17h.01"></path>
         <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path>
       </svg>
-      <span id="connection-text">Sin conexión con el servidor.</span>
-      <button class="btn small" id="btn-reintentar-conexion" type="button">Reintentar</button>
+      <span id="connection-text">Sin Internet · Puedes marcar igual: tus registros se guardan en el teléfono y se suben solos al volver la conexión.</span>
+      <button class="btn small" id="btn-reintentar-conexion" type="button">Sincronizar</button>
+    </div>
+
+    <div class="sync-banner hidden" id="sync-banner" role="status">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+        <path d="m12 13 3 3-3 3"></path><path d="M9 16h6"></path>
+      </svg>
+      <span id="sync-text">Marcajes guardados en el teléfono pendientes de subir.</span>
+      <button class="btn small" id="btn-sincronizar-ahora" type="button">Subir ahora</button>
     </div>
 
     <!-- PASO 1: Seleccionar quién eres -->
