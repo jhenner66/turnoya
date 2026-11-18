@@ -2471,3 +2471,284 @@ textarea {
     padding: 14px 16px;
   }
 }
+
+/* ================================================================
+   Interfaz optimizada para Teléfono (Admin y Colaborador)
+   ================================================================ */
+
+.worker-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  /* Evita zoom automático en iOS/Android al tocar campos */
+  input[type="date"],
+  input[type="time"],
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="tel"],
+  input[type="search"],
+  select,
+  textarea {
+    font-size: 16px;
+    padding: 11px 12px;
+    border-radius: 11px;
+  }
+
+  /* Botones táctiles cómodos para el pulgar */
+  .btn {
+    min-height: 42px;
+  }
+
+  .btn.small {
+    min-height: 36px;
+    padding: 7px 12px;
+  }
+
+  /* Encabezado superior fijo tipo app móvil en Admin */
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    padding: 14px 16px;
+    background: rgba(242, 244, 247, 0.94);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .content {
+    padding: 14px 14px 28px;
+    gap: 16px;
+  }
+
+  /* Modales como Bottom Sheet (deslizan desde abajo en el teléfono) */
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal,
+  .modal.wide {
+    max-width: 100%;
+    max-height: 92vh;
+    border-radius: 22px 22px 0 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .modal::before {
+    content: "";
+    width: 40px;
+    height: 4px;
+    margin: 10px auto 2px;
+    border-radius: 999px;
+    background: #cbd5e1;
+    flex-shrink: 0;
+  }
+
+  .modal-foot {
+    flex-direction: column-reverse;
+  }
+
+  .modal-foot .btn {
+    width: 100%;
+    min-height: 46px;
+  }
+
+  /* Todas las tablas se convierten en tarjetas limpias en teléfono */
+  .table-wrap {
+    border: 0;
+    border-radius: 0;
+    overflow: visible;
+  }
+
+  .table,
+  .table thead,
+  .table tbody,
+  .table tr,
+  .table th,
+  .table td {
+    display: block;
+    width: 100%;
+    min-width: 0 !important;
+  }
+
+  .table thead {
+    display: none;
+  }
+
+  .table tbody tr {
+    margin-bottom: 12px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  .table td {
+    border: 0;
+    padding: 6px 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: right;
+  }
+
+  .table td::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--muted);
+    flex-shrink: 0;
+    text-align: left;
+  }
+
+  .table td[data-label="Colaborador"] {
+    justify-content: flex-start;
+    text-align: left;
+    padding-bottom: 10px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .table td[data-label="Colaborador"]::before,
+  .table td[data-label="Acciones"]::before {
+    display: none;
+  }
+
+  .table td[data-label="Acciones"] {
+    justify-content: flex-start;
+    border-top: 1px solid #f1f5f9;
+    margin-top: 6px;
+    padding-top: 10px;
+  }
+
+  .table .row-actions {
+    width: 100%;
+    justify-content: stretch;
+    gap: 8px;
+  }
+
+  .table .row-actions .btn {
+    flex: 1;
+  }
+
+  /* Fila desplegable de registros por colaborador en móvil */
+  .colab-detail-row {
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .colab-detail-row > td {
+    padding: 0 !important;
+    display: block;
+  }
+
+  .colab-detail-row > td::before {
+    display: none;
+  }
+
+  .sub-table tbody tr {
+    background: #f8fafc;
+  }
+
+  /* Vista del colaborador en el teléfono: navegación inferior por pestañas */
+  .worker-shell {
+    padding: 12px 12px calc(86px + env(safe-area-inset-bottom, 0px));
+    gap: 14px;
+  }
+
+  .worker-header {
+    position: sticky;
+    top: 8px;
+    z-index: 30;
+    padding: 12px 14px;
+    border-radius: 14px;
+  }
+
+  .worker-header #live-clock {
+    font-size: 17px;
+  }
+
+  .worker-header #live-date {
+    display: none;
+  }
+
+  .worker-person h1 {
+    font-size: 19px;
+  }
+
+  .worker-timer-box {
+    grid-template-columns: 1fr 1fr;
+    padding: 14px;
+  }
+
+  .worker-timer-item.highlight {
+    grid-column: 1 / -1;
+    order: -1;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .worker-timer-item.highlight strong {
+    font-size: 28px;
+  }
+
+  .worker-punch-actions .btn-lg {
+    flex: 1 1 100%;
+    min-height: 52px;
+    font-size: 16px;
+  }
+
+  /* Pestañas inferiores en el teléfono para el colaborador */
+  .worker-main[data-tab="jornada"] #seccion-resumen,
+  .worker-main[data-tab="jornada"] #seccion-registros {
+    display: none;
+  }
+
+  .worker-main[data-tab="resumen"] #tarjeta-jornada,
+  .worker-main[data-tab="resumen"] #seccion-registros {
+    display: none;
+  }
+
+  .worker-main[data-tab="registros"] #tarjeta-jornada,
+  .worker-main[data-tab="registros"] #seccion-resumen {
+    display: none;
+  }
+
+  .worker-bottom-nav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 40;
+    display: flex;
+    justify-content: space-around;
+    gap: 4px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px));
+    background: rgba(15, 23, 42, 0.98);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid #1e293b;
+  }
+
+  .worker-bottom-nav .nav-btn {
+    flex-direction: column;
+    gap: 3px;
+    padding: 6px 4px;
+    font-size: 11px;
+    text-align: center;
+    border-radius: 9px;
+  }
+
+  .worker-bottom-nav .nav-btn.is-active {
+    background: transparent;
+    box-shadow: none;
+    color: #2dd4bf;
+  }
+}

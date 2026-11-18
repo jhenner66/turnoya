@@ -157,6 +157,7 @@ const state = {
   config: { nombre_tienda: 'Mi Tienda', jornada_horas: '8' },
   reporte: null,
   registros: [],
+  tabMovil: 'jornada',
   busqueda: '',
   desde: inicioDeMes(),
   hasta: hoyISO()
@@ -288,6 +289,7 @@ function render() {
   seleccion.classList.add('hidden');
   panel.classList.remove('hidden');
   btnCambiar.classList.remove('hidden');
+  panel.dataset.tab = state.tabMovil;
   renderJornada(persona);
 }
 
@@ -655,6 +657,21 @@ function conectarEventos() {
   });
 
   $('#btn-cambiar-persona').addEventListener('click', () => elegirPersona(null));
+
+  const navMovil = $('#worker-bottom-nav');
+  if (navMovil) {
+    navMovil.addEventListener('click', (e) => {
+      const boton = e.target.closest('[data-worker-tab]');
+      if (!boton) return;
+      state.tabMovil = boton.dataset.workerTab;
+      const panel = $('#vista-panel');
+      if (panel) panel.dataset.tab = state.tabMovil;
+      $$('[data-worker-tab]', navMovil).forEach((b) =>
+        b.classList.toggle('is-active', b === boton)
+      );
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
 
   $('#acciones-jornada').addEventListener('click', async (e) => {
     const boton = e.target.closest('button[data-accion]');

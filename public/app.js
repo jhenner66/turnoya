@@ -659,7 +659,7 @@ function renderColaboradores() {
       const contacto = [colaborador.email, colaborador.telefono].filter(Boolean);
       return `
         <tr>
-          <td>
+          <td data-label="Colaborador">
             <div class="cell-person">
               ${avatarHTML(colaborador.nombre)}
               <div>
@@ -668,14 +668,14 @@ function renderColaboradores() {
               </div>
             </div>
           </td>
-          <td>${escapar(colaborador.puesto || '—')}</td>
-          <td>${contacto.length ? escapar(contacto.join(' · ')) : '—'}</td>
-          <td>
+          <td data-label="Puesto">${escapar(colaborador.puesto || '—')}</td>
+          <td data-label="Contacto">${contacto.length ? escapar(contacto.join(' · ')) : '—'}</td>
+          <td data-label="Estado">
             <span class="badge ${colaborador.activo ? 'badge-on' : 'badge-off'}">
               ${colaborador.activo ? 'Activo' : 'Inactivo'}
             </span>
           </td>
-          <td data-label="Colaborador">
+          <td data-label="Acciones">
             <div class="row-actions">
               <button class="btn ghost small" type="button" data-accion="editar-colaborador" data-id="${colaborador.id}">
                 Editar
