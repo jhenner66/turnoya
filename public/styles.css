@@ -2752,3 +2752,38 @@ textarea {
     color: #2dd4bf;
   }
 }
+
+.hours-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+@media (max-width: 720px) {
+  /* Tarjeta de Totales clara y con etiquetas en teléfono */
+  .table tbody tr.total-row {
+    background: #f0fdfa;
+    border: 1px solid #99f6e4;
+    padding: 12px 14px;
+  }
+
+  .table tr.total-row td:empty {
+    display: none;
+  }
+
+  .table tr.total-row td:first-child {
+    justify-content: flex-start;
+    text-align: left;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--brand-ink);
+    padding-bottom: 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid #ccfbf1;
+  }
+
+  .table tr.total-row td:first-child::before {
+    display: none;
+  }
+}

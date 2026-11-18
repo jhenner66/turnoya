@@ -534,9 +534,9 @@ function renderMisRegistros(registros) {
       <td>Totales</td>
       <td></td>
       <td></td>
-      <td>${totalPausa ? formatoMinutos(totalPausa) : '—'}</td>
-      <td>${formatoHoras(totalHoras)}</td>
-      <td>${totalExtra ? formatoHoras(totalExtra) : '—'}</td>
+      <td data-label="Pausa">${totalPausa ? formatoMinutos(totalPausa) : '—'}</td>
+      <td data-label="Horas">${formatoHoras(totalHoras)}</td>
+      <td data-label="Extra del día">${totalExtra ? formatoHoras(totalExtra) : '—'}</td>
       <td></td>
     </tr>
   `;

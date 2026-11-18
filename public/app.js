@@ -1197,13 +1197,15 @@ function renderReporte() {
               <td class="right cell-mono" data-label="Turnos">${colaborador.turnos}</td>
               <td class="right cell-mono" data-label="Pausas">${colaborador.pausa_minutos ? formatoMinutos(colaborador.pausa_minutos) : '—'}</td>
               <td class="right cell-mono" data-label="Horas">
-                <strong>${formatoHoras(colaborador.horas)}</strong>
-                <div class="progress" title="Horas trabajadas frente a la jornada esperada (${colaborador.dias} día${colaborador.dias === 1 ? '' : 's'} × ${formatoHoras(reporte.umbral)})">
-                  <span class="progress-bar${colaborador.extra ? ' is-over' : ''}" data-pct="${
-                    reporte.umbral && colaborador.dias
-                      ? Math.round((colaborador.horas / (colaborador.dias * reporte.umbral)) * 100)
-                      : 0
-                  }"></span>
+                <div class="hours-cell">
+                  <strong>${formatoHoras(colaborador.horas)}</strong>
+                  <div class="progress" title="Horas trabajadas frente a la jornada esperada (${colaborador.dias} día${colaborador.dias === 1 ? '' : 's'} × ${formatoHoras(reporte.umbral)})">
+                    <span class="progress-bar${colaborador.extra ? ' is-over' : ''}" data-pct="${
+                      reporte.umbral && colaborador.dias
+                        ? Math.round((colaborador.horas / (colaborador.dias * reporte.umbral)) * 100)
+                        : 0
+                    }"></span>
+                  </div>
                 </div>
               </td>
               <td class="right cell-mono${colaborador.extra ? ' cell-extra-on' : ''}" data-label="Horas extra">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
@@ -1212,15 +1214,19 @@ function renderReporte() {
           `;
         })
         .join('') +
-      filaTotales(7, [
-        `Totales`,
-        '',
-        reporte.totales.dias,
-        reporte.totales.turnos,
-        formatoMinutos(reporte.totales.pausa_minutos),
-        formatoHoras(reporte.totales.horas),
-        formatoHoras(reporte.totales.extra)
-      ]);
+      filaTotales(
+        7,
+        [
+          `Totales`,
+          '',
+          reporte.totales.dias,
+          reporte.totales.turnos,
+          formatoMinutos(reporte.totales.pausa_minutos),
+          formatoHoras(reporte.totales.horas),
+          formatoHoras(reporte.totales.extra)
+        ],
+        ['', '', 'Días', 'Turnos', 'Pausas', 'Horas', 'Horas extra']
+      );
   }
 
   const cuerpoDias = $('#tabla-reporte-dias');
@@ -1245,13 +1251,17 @@ function renderReporte() {
           `
         )
         .join('') +
-      filaTotales(5, [
-        'Totales',
-        reporte.totales.turnos,
-        formatoMinutos(reporte.totales.pausa_minutos),
-        formatoHoras(reporte.totales.horas),
-        formatoHoras(reporte.totales.extra)
-      ]);
+      filaTotales(
+        5,
+        [
+          'Totales',
+          reporte.totales.turnos,
+          formatoMinutos(reporte.totales.pausa_minutos),
+          formatoHoras(reporte.totales.horas),
+          formatoHoras(reporte.totales.extra)
+        ],
+        ['', 'Turnos', 'Pausas', 'Horas', 'Horas extra']
+      );
   }
   aplicarEstilosDinamicos(cuerpoColabs);
 }
@@ -1344,13 +1354,14 @@ function renderResumenReporte(reporte) {
   caja.innerHTML = partes.join(' ');
 }
 
-function filaTotales(columnas, valores) {
+function filaTotales(columnas, valores, etiquetas = []) {
   return `
     <tr class="total-row">
       ${valores
         .map((valor, indice) => {
           const alineacion = indice === 0 ? '' : 'right';
-          return `<td class="${alineacion}">${valor}</td>`;
+          const etiqueta = etiquetas[indice] ? ` data-label="${escapar(etiquetas[indice])}"` : '';
+          return `<td class="${alineacion}"${etiqueta}>${valor}</td>`;
         })
         .join('')}
     </tr>
