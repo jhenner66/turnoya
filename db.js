@@ -6,6 +6,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 
 // [ETIQUETA: DETECCIÓN DE MODO LOCAL O NUBE]
 const urlRemota = (
@@ -83,6 +84,7 @@ const ESQUEMA = [
     email TEXT NOT NULL DEFAULT '',
     telefono TEXT NOT NULL DEFAULT '',
     tarifa_hora REAL DEFAULT NULL,
+    pin_hash TEXT DEFAULT NULL,
     activo INTEGER NOT NULL DEFAULT 1,
     creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
   )`,
@@ -128,11 +130,14 @@ async function inicializar() {
 
   await cliente.batch(ESQUEMA, 'write');
 
-  // Migración segura para bases de datos ya existentes sin columna tarifa_hora.
+  // Migración segura para bases de datos ya existentes sin columnas tarifa_hora o pin_hash.
   const columnasColab = await cliente.execute('PRAGMA table_info(colaboradores)');
-  const tieneTarifa = columnasColab.rows.some((c) => c.name === 'tarifa_hora');
-  if (!tieneTarifa) {
+  const nombresCols = new Set(columnasColab.rows.map((c) => c.name));
+  if (!nombresCols.has('tarifa_hora')) {
     await cliente.execute('ALTER TABLE colaboradores ADD COLUMN tarifa_hora REAL DEFAULT NULL');
+  }
+  if (!nombresCols.has('pin_hash')) {
+    await cliente.execute('ALTER TABLE colaboradores ADD COLUMN pin_hash TEXT DEFAULT NULL');
   }
 
   for (const [clave, valor] of Object.entries(VALORES_POR_DEFECTO)) {
@@ -141,6 +146,14 @@ async function inicializar() {
       args: [clave, valor]
     });
   }
+
+  // Secreto persistente para firmar sesiones HMAC (compatible con Vercel serverless).
+  const secretoInicial =
+    (process.env.TURNOYA_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
+  await cliente.execute({
+    sql: 'INSERT OR IGNORE INTO configuracion (clave, valor) VALUES (?, ?)',
+    args: ['auth_secreto', secretoInicial]
+  });
 }
 
 async function cerrar() {

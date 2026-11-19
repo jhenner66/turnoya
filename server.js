@@ -19,6 +19,7 @@ if (process.env.TURNOYA_TZ) {
 
 const path = require('node:path');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const express = require('express');
 const {
   dataDir,
@@ -38,11 +39,12 @@ const HOST = process.env.HOST || '0.0.0.0';
 const VERSION = paquete.version || '1.0.0';
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 
 /* ==================================================================
  * [ETIQUETA: SEGURIDAD HTTP Y ARCHIVOS ESTÁTICOS]
- * Qué hace: Aplica cabeceras CSP/anti-clickjacking, parseo JSON,
- * sirve `public/`, expone `/mi-turno` y prepara la BD antes de `/api`.
+ * Qué hace: Aplica cabeceras CSP/HSTS/anti-clickjacking, parseo JSON,
+ * sirve `public/`, expone `/mi-turno` y prepara BD/sesión antes de `/api`.
  * ================================================================== */
 
 // Cabeceras básicas de seguridad.
@@ -58,6 +60,9 @@ app.use((req, res, next) => {
     'Content-Security-Policy',
     "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; font-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
   );
+  if (req.secure || req.headers['x-forwarded-proto'] === 'https') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 
@@ -82,6 +87,62 @@ app.use('/api', async (req, res, next) => {
 app.use('/api', (req, res, next) => {
   res.setHeader('Cache-Control', 'no-store');
   next();
+});
+
+// Validación anti-CSRF en mutaciones HTTP y carga de sesión firmada.
+app.use('/api', async (req, res, next) => {
+  try {
+    if (['POST', 'PUT', 'DELETE'].includes(req.method)) {
+      const origen = req.headers.origin;
+      const host = req.get('host');
+      if (origen && host) {
+        try {
+          if (new URL(origen).host !== host) {
+            throw new HttpError(403, 'Origen no autorizado.');
+          }
+        } catch (err) {
+          if (err instanceof HttpError) throw err;
+          throw new HttpError(403, 'Origen no válido.');
+        }
+      }
+      const esCliente = req.headers['x-turnoya-cliente'] === '1';
+      const esJson = String(req.headers['content-type'] || '').includes('application/json');
+      if (!esCliente && !esJson) {
+        throw new HttpError(403, 'Solicitud rechazada por protección CSRF.');
+      }
+    }
+
+    const secreto = await obtenerSecretoAuth();
+    req.secretoAuth = secreto;
+    const cookies = parsearCookies(req);
+
+    const candidatoAdmin =
+      req.headers['x-turnoya-admin-token'] || cookies.turnoya_admin || '';
+    const candidatoColab =
+      req.headers['x-turnoya-colab-token'] || cookies.turnoya_colab || '';
+    const candidatoGeneral = req.headers['x-turnoya-auth'] || '';
+
+    let sesionAdmin = verificarTokenSesion(candidatoAdmin, secreto);
+    if ((!sesionAdmin || sesionAdmin.rol !== 'admin') && candidatoGeneral) {
+      const alt = verificarTokenSesion(candidatoGeneral, secreto);
+      if (alt && alt.rol === 'admin') sesionAdmin = alt;
+    }
+
+    let sesionColab = verificarTokenSesion(candidatoColab, secreto);
+    if ((!sesionColab || sesionColab.rol !== 'colab') && candidatoGeneral) {
+      const alt = verificarTokenSesion(candidatoGeneral, secreto);
+      if (alt && alt.rol === 'colab') sesionColab = alt;
+    }
+
+    req.esAdmin = Boolean(sesionAdmin && sesionAdmin.rol === 'admin');
+    req.sesionColabId =
+      sesionColab && sesionColab.rol === 'colab' && Number.isInteger(Number(sesionColab.colaborador_id))
+        ? Number(sesionColab.colaborador_id)
+        : null;
+    next();
+  } catch (error) {
+    next(error);
+  }
 });
 
 /* ==================================================================
@@ -191,11 +252,22 @@ function minutosEntre(desdeISO, hastaISO) {
   return Math.max(0, (hasta - desde) / 60000);
 }
 
+const CLAVES_INTERNAS_CONFIG = new Set(['auth_secreto', 'admin_clave_hash']);
+
 async function leerConfig() {
   const filas = await todos('SELECT clave, valor FROM configuracion');
   const config = {};
-  for (const fila of filas) config[fila.clave] = fila.valor;
+  for (const fila of filas) {
+    if (!CLAVES_INTERNAS_CONFIG.has(fila.clave)) {
+      config[fila.clave] = fila.valor;
+    }
+  }
   return config;
+}
+
+async function leerConfigInterna(clave) {
+  const fila = await uno('SELECT valor FROM configuracion WHERE clave = ?', [clave]);
+  return fila ? fila.valor : null;
 }
 
 async function guardarConfig(clave, valor) {
@@ -205,6 +277,379 @@ async function guardarConfig(clave, valor) {
     [clave, String(valor)]
   );
 }
+
+/* ==================================================================
+ * [ETIQUETA: SEGURIDAD, SESIONES Y CONTROL DE ACCESO]
+ * Qué hace: Hash scrypt para contraseñas/PINs, tokens HMAC-SHA256,
+ * limitador anti-fuerza bruta, verificador offline y middlewares de rol.
+ * ================================================================== */
+
+const DURACION_SESION_ADMIN_MS = 12 * 60 * 60 * 1000;
+const DURACION_SESION_COLAB_MS = 30 * 24 * 60 * 60 * 1000;
+const VENTANA_INTENTOS_MS = 10 * 60 * 1000;
+const MAX_INTENTOS_FALLIDOS = 5;
+const intentosFallidos = new Map();
+
+function crearHashSecreto(secreto) {
+  const sal = crypto.randomBytes(16).toString('hex');
+  const derivado = crypto.scryptSync(String(secreto ?? ''), sal, 64).toString('hex');
+  return `${sal}:${derivado}`;
+}
+
+function verificarHashSecreto(secreto, almacenado) {
+  if (!almacenado || typeof almacenado !== 'string' || !almacenado.includes(':')) {
+    return false;
+  }
+  const [sal, hashHex] = almacenado.split(':');
+  if (!sal || !hashHex) return false;
+  try {
+    const esperado = Buffer.from(hashHex, 'hex');
+    const actual = crypto.scryptSync(String(secreto ?? ''), sal, esperado.length);
+    return esperado.length === actual.length && crypto.timingSafeEqual(esperado, actual);
+  } catch {
+    return false;
+  }
+}
+
+function crearVerificadorOffline(colaboradorId, pin, secreto) {
+  const sal = crypto
+    .createHmac('sha256', String(secreto))
+    .update(`offline-salt:${colaboradorId}`)
+    .digest('hex')
+    .slice(0, 16);
+  const hash = crypto
+    .createHash('sha256')
+    .update(`${sal}:${colaboradorId}:${pin}`)
+    .digest('hex');
+  return `${sal}:${hash}`;
+}
+
+async function obtenerSecretoAuth() {
+  let secreto = await leerConfigInterna('auth_secreto');
+  if (!secreto) {
+    secreto =
+      (process.env.TURNOYA_SECRET || '').trim() || crypto.randomBytes(32).toString('hex');
+    await guardarConfig('auth_secreto', secreto);
+  }
+  return secreto;
+}
+
+async function obtenerHashAdmin() {
+  let hash = await leerConfigInterna('admin_clave_hash');
+  if (!hash && process.env.ADMIN_PASSWORD && process.env.ADMIN_PASSWORD.trim().length >= 4) {
+    hash = crearHashSecreto(process.env.ADMIN_PASSWORD.trim());
+    await guardarConfig('admin_clave_hash', hash);
+  }
+  return hash || null;
+}
+
+function crearTokenSesion(datos, secreto, duracionMs) {
+  const payload = { ...datos, exp: Date.now() + duracionMs };
+  const payloadB64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+  const firma = crypto.createHmac('sha256', String(secreto)).update(payloadB64).digest('base64url');
+  return `${payloadB64}.${firma}`;
+}
+
+function verificarTokenSesion(token, secreto) {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  const partes = token.split('.');
+  if (partes.length !== 2) return null;
+  const [payloadB64, firma] = partes;
+  if (!payloadB64 || !firma) return null;
+
+  try {
+    const esperada = crypto
+      .createHmac('sha256', String(secreto))
+      .update(payloadB64)
+      .digest('base64url');
+    const bufA = Buffer.from(firma, 'utf8');
+    const bufB = Buffer.from(esperada, 'utf8');
+    if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+      return null;
+    }
+    const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString('utf8'));
+    if (!payload || !Number.isFinite(payload.exp) || payload.exp <= Date.now()) {
+      return null;
+    }
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function parsearCookies(req) {
+  const crudo = String(req.headers.cookie || '');
+  const resultado = {};
+  for (const parte of crudo.split(';')) {
+    const idx = parte.indexOf('=');
+    if (idx <= 0) continue;
+    const clave = parte.slice(0, idx).trim();
+    const valor = parte.slice(idx + 1).trim();
+    if (!clave) continue;
+    try {
+      resultado[clave] = decodeURIComponent(valor);
+    } catch {
+      resultado[clave] = valor;
+    }
+  }
+  return resultado;
+}
+
+function enviarCookieSesion(req, res, nombre, token, maxAgeSeg) {
+  const esHttps = Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https');
+  const atributos = [
+    `${nombre}=${encodeURIComponent(token)}`,
+    'HttpOnly',
+    'Path=/',
+    'SameSite=Lax',
+    `Max-Age=${maxAgeSeg}`
+  ];
+  if (esHttps) atributos.push('Secure');
+  res.append('Set-Cookie', atributos.join('; '));
+}
+
+function limpiarCookieSesion(req, res, nombre) {
+  const esHttps = Boolean(req.secure || req.headers['x-forwarded-proto'] === 'https');
+  const atributos = [`${nombre}=`, 'HttpOnly', 'Path=/', 'SameSite=Lax', 'Max-Age=0'];
+  if (esHttps) atributos.push('Secure');
+  res.append('Set-Cookie', atributos.join('; '));
+}
+
+function claveIntento(req, destino) {
+  const ip = String(req.ip || req.socket?.remoteAddress || 'local');
+  return `${ip}:${destino}`;
+}
+
+function verificarNoBloqueado(req, destino) {
+  const clave = claveIntento(req, destino);
+  const registro = intentosFallidos.get(clave);
+  if (!registro) return;
+  const ahora = Date.now();
+  if (registro.bloqueadoHasta && registro.bloqueadoHasta > ahora) {
+    const min = Math.max(1, Math.ceil((registro.bloqueadoHasta - ahora) / 60000));
+    throw new HttpError(
+      429,
+      `Demasiados intentos fallidos. Intenta de nuevo en ${min} minuto${min === 1 ? '' : 's'}.`
+    );
+  }
+  if (ahora - registro.ultimoIntento > VENTANA_INTENTOS_MS) {
+    intentosFallidos.delete(clave);
+  }
+}
+
+function registrarIntentoFallido(req, destino) {
+  if (intentosFallidos.size > 5000) intentosFallidos.clear();
+  const clave = claveIntento(req, destino);
+  const ahora = Date.now();
+  const prev = intentosFallidos.get(clave);
+  const conteo =
+    prev && ahora - prev.ultimoIntento <= VENTANA_INTENTOS_MS ? prev.conteo + 1 : 1;
+  const bloqueadoHasta =
+    conteo >= MAX_INTENTOS_FALLIDOS ? ahora + VENTANA_INTENTOS_MS : 0;
+  intentosFallidos.set(clave, { conteo, bloqueadoHasta, ultimoIntento: ahora });
+  if (bloqueadoHasta > 0) {
+    throw new HttpError(
+      429,
+      'Demasiados intentos fallidos. Bloqueado temporalmente por 10 minutos.'
+    );
+  }
+}
+
+function limpiarIntentos(req, destino) {
+  intentosFallidos.delete(claveIntento(req, destino));
+}
+
+function exigirAdmin(req) {
+  if (!req.esAdmin) {
+    throw new HttpError(401, 'Se requiere iniciar sesión como administrador.');
+  }
+}
+
+async function exigirAccesoColaborador(req, colaboradorId) {
+  const colaborador = await exigirColaborador(colaboradorId);
+  if (req.esAdmin) return colaborador;
+  if (req.sesionColabId === colaborador.id) return colaborador;
+  if (req.sesionColabId && req.sesionColabId !== colaborador.id) {
+    throw new HttpError(
+      403,
+      'No tienes permiso para acceder a los datos de otro colaborador.'
+    );
+  }
+  throw new HttpError(
+    401,
+    colaborador.pin_hash
+      ? 'Ingresa tu PIN de 4 dígitos para continuar.'
+      : 'Selecciona tu perfil de colaborador para continuar.'
+  );
+}
+
+/* ==================================================================
+ * [ETIQUETA: API DE AUTENTICACIÓN (ADMIN Y COLABORADOR)]
+ * Qué hace: Estado de sesión, configuración inicial de clave admin,
+ * login/cambio de clave admin, login por PIN del colaborador y logout.
+ * ================================================================== */
+
+app.get(
+  '/api/auth/estado',
+  ruta(async (req, res) => {
+    const hashAdmin = await obtenerHashAdmin();
+    res.json({
+      admin_configurado: Boolean(hashAdmin),
+      admin_autenticado: Boolean(req.esAdmin),
+      colaborador_id: req.sesionColabId
+    });
+  })
+);
+
+app.post(
+  '/api/auth/admin/configurar',
+  ruta(async (req, res) => {
+    if (await obtenerHashAdmin()) {
+      throw new HttpError(403, 'La contraseña de administrador ya fue configurada.');
+    }
+    const clave = String((req.body || {}).clave ?? '').trim();
+    if (clave.length < 4 || clave.length > 64) {
+      throw new HttpError(400, 'La contraseña o PIN debe tener entre 4 y 64 caracteres.');
+    }
+    await guardarConfig('admin_clave_hash', crearHashSecreto(clave));
+    const token = crearTokenSesion(
+      { rol: 'admin' },
+      req.secretoAuth,
+      DURACION_SESION_ADMIN_MS
+    );
+    enviarCookieSesion(
+      req,
+      res,
+      'turnoya_admin',
+      token,
+      Math.floor(DURACION_SESION_ADMIN_MS / 1000)
+    );
+    res.status(201).json({ ok: true, token });
+  })
+);
+
+app.post(
+  '/api/auth/admin/login',
+  ruta(async (req, res) => {
+    verificarNoBloqueado(req, 'admin');
+    const hashAdmin = await obtenerHashAdmin();
+    if (!hashAdmin) {
+      throw new HttpError(400, 'Primero debes configurar la contraseña de administrador.');
+    }
+    const clave = String((req.body || {}).clave ?? '').trim();
+    if (!clave || !verificarHashSecreto(clave, hashAdmin)) {
+      registrarIntentoFallido(req, 'admin');
+      throw new HttpError(401, 'Contraseña o PIN de administrador incorrecto.');
+    }
+    limpiarIntentos(req, 'admin');
+    const token = crearTokenSesion(
+      { rol: 'admin' },
+      req.secretoAuth,
+      DURACION_SESION_ADMIN_MS
+    );
+    enviarCookieSesion(
+      req,
+      res,
+      'turnoya_admin',
+      token,
+      Math.floor(DURACION_SESION_ADMIN_MS / 1000)
+    );
+    res.json({ ok: true, token });
+  })
+);
+
+app.post(
+  '/api/auth/admin/cambiar',
+  ruta(async (req, res) => {
+    exigirAdmin(req);
+    const body = req.body || {};
+    const actual = String(body.clave_actual ?? '').trim();
+    const nueva = String(body.clave_nueva ?? '').trim();
+    const hashAdmin = await obtenerHashAdmin();
+    if (!hashAdmin || !verificarHashSecreto(actual, hashAdmin)) {
+      throw new HttpError(401, 'La contraseña actual no es correcta.');
+    }
+    if (nueva.length < 4 || nueva.length > 64) {
+      throw new HttpError(400, 'La nueva clave debe tener entre 4 y 64 caracteres.');
+    }
+    await guardarConfig('admin_clave_hash', crearHashSecreto(nueva));
+    const token = crearTokenSesion(
+      { rol: 'admin' },
+      req.secretoAuth,
+      DURACION_SESION_ADMIN_MS
+    );
+    enviarCookieSesion(
+      req,
+      res,
+      'turnoya_admin',
+      token,
+      Math.floor(DURACION_SESION_ADMIN_MS / 1000)
+    );
+    res.json({ ok: true, token });
+  })
+);
+
+app.post(
+  '/api/auth/colaborador/login',
+  ruta(async (req, res) => {
+    const body = req.body || {};
+    const colaborador = await exigirColaborador(Number(body.colaborador_id));
+    if (!colaborador.activo) {
+      throw new HttpError(400, 'Este colaborador está inactivo.');
+    }
+
+    const destino = `colab:${colaborador.id}`;
+    verificarNoBloqueado(req, destino);
+
+    let pinLimpio = null;
+    if (colaborador.pin_hash) {
+      pinLimpio = String(body.pin ?? '').trim();
+      if (!/^\d{4}$/.test(pinLimpio) || !verificarHashSecreto(pinLimpio, colaborador.pin_hash)) {
+        registrarIntentoFallido(req, destino);
+        throw new HttpError(401, 'PIN incorrecto. Verifica tus 4 dígitos.');
+      }
+      limpiarIntentos(req, destino);
+    }
+
+    const token = crearTokenSesion(
+      { rol: 'colab', colaborador_id: colaborador.id },
+      req.secretoAuth,
+      DURACION_SESION_COLAB_MS
+    );
+    enviarCookieSesion(
+      req,
+      res,
+      'turnoya_colab',
+      token,
+      Math.floor(DURACION_SESION_COLAB_MS / 1000)
+    );
+    const verificadorOffline =
+      colaborador.pin_hash && pinLimpio
+        ? crearVerificadorOffline(colaborador.id, pinLimpio, req.secretoAuth)
+        : null;
+
+    res.json({
+      ok: true,
+      token,
+      verificador_offline: verificadorOffline,
+      colaborador: mapearColaborador(colaborador)
+    });
+  })
+);
+
+app.post(
+  '/api/auth/logout',
+  ruta(async (req, res) => {
+    const tipo = String((req.body || {}).tipo || 'todos');
+    if (tipo === 'admin' || tipo === 'todos') {
+      limpiarCookieSesion(req, res, 'turnoya_admin');
+    }
+    if (tipo === 'colab' || tipo === 'todos') {
+      limpiarCookieSesion(req, res, 'turnoya_colab');
+    }
+    res.json({ ok: true });
+  })
+);
 
 async function umbralDiario() {
   const valor = Number((await leerConfig()).jornada_horas);
@@ -223,9 +668,31 @@ function mapearColaborador(fila) {
       tarifa === null || tarifa === undefined || tarifa === ''
         ? null
         : redondear(Number(tarifa)),
+    tiene_pin: Boolean(fila.pin_hash),
     activo: Boolean(fila.activo),
     creado_en: fila.creado_en
   };
+}
+
+function mapearColaboradorPublico(fila) {
+  return {
+    id: fila.id,
+    nombre: fila.nombre,
+    puesto: fila.puesto,
+    activo: Boolean(fila.activo),
+    tiene_pin: Boolean(fila.pin_hash)
+  };
+}
+
+function leerPinOpcional(valor) {
+  if (valor === undefined || valor === null || String(valor).trim() === '') {
+    return null;
+  }
+  const limpio = String(valor).trim();
+  if (!/^\d{4}$/.test(limpio)) {
+    throw new HttpError(400, 'El PIN debe tener exactamente 4 dígitos numéricos.');
+  }
+  return limpio;
 }
 
 function leerTarifaOpcional(valor, campo = 'La tarifa por hora') {
@@ -351,27 +818,35 @@ app.get(
     const filas = await todos(
       'SELECT * FROM colaboradores ORDER BY activo DESC, nombre COLLATE NOCASE ASC'
     );
-    res.json(filas.map(mapearColaborador));
+    if (req.esAdmin) {
+      res.json(filas.map(mapearColaborador));
+      return;
+    }
+    res.json(filas.filter((f) => Boolean(f.activo)).map(mapearColaboradorPublico));
   })
 );
 
 app.post(
   '/api/colaboradores',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const body = req.body || {};
     const nombre = texto(body.nombre, 80);
     if (!nombre) throw new HttpError(400, 'El nombre es obligatorio.');
     const tarifaHora = leerTarifaOpcional(body.tarifa_hora);
+    const pin = leerPinOpcional(body.pin);
+    const pinHash = pin ? crearHashSecreto(pin) : null;
 
     const info = await ejecutar(
-      `INSERT INTO colaboradores (nombre, puesto, email, telefono, tarifa_hora, activo, creado_en)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO colaboradores (nombre, puesto, email, telefono, tarifa_hora, pin_hash, activo, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre,
         texto(body.puesto, 80),
         texto(body.email, 120),
         texto(body.telefono, 40),
         tarifaHora,
+        pinHash,
         body.activo === false ? 0 : 1,
         aISOlocal()
       ]
@@ -387,6 +862,7 @@ app.post(
 app.put(
   '/api/colaboradores/:id',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const body = req.body || {};
     const id = Number(req.params.id);
     const actual = await exigirColaborador(id);
@@ -398,9 +874,16 @@ app.put(
         ? leerTarifaOpcional(body.tarifa_hora)
         : actual.tarifa_hora ?? null;
 
+    let pinHash = actual.pin_hash ?? null;
+    if (body.quitar_pin === true) {
+      pinHash = null;
+    } else if (body.pin !== undefined && String(body.pin ?? '').trim() !== '') {
+      pinHash = crearHashSecreto(leerPinOpcional(body.pin));
+    }
+
     await ejecutar(
       `UPDATE colaboradores
-       SET nombre = ?, puesto = ?, email = ?, telefono = ?, tarifa_hora = ?, activo = ?
+       SET nombre = ?, puesto = ?, email = ?, telefono = ?, tarifa_hora = ?, pin_hash = ?, activo = ?
        WHERE id = ?`,
       [
         nombre,
@@ -408,6 +891,7 @@ app.put(
         texto(body.email, 120),
         texto(body.telefono, 40),
         tarifaHora,
+        pinHash,
         body.activo === false ? 0 : 1,
         id
       ]
@@ -421,6 +905,7 @@ app.put(
 app.delete(
   '/api/colaboradores/:id',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const id = Number(req.params.id);
     await exigirColaborador(id);
     // Borrado explícito de sus turnos para no depender de PRAGMA foreign_keys.
@@ -447,6 +932,19 @@ app.get(
     const activos = (
       await todos(`${SELECT_TURNOS} WHERE t.salida IS NULL ORDER BY t.entrada ASC`)
     ).map(mapearTurno);
+
+    if (!req.esAdmin) {
+      res.json({
+        ahora,
+        fecha: hoy,
+        activos: activos.map((t) => ({
+          ...t,
+          notas: req.sesionColabId === t.colaborador_id ? t.notas : ''
+        })),
+        resumen: {}
+      });
+      return;
+    }
 
     const turnosHoy = await todos('SELECT * FROM turnos WHERE fecha = ?', [hoy]);
 
@@ -496,6 +994,13 @@ app.get(
     const { desde, hasta } = leerRango(req);
     const colaboradorId = Number(req.query.colaborador_id);
 
+    if (!req.esAdmin) {
+      if (!Number.isInteger(colaboradorId) || colaboradorId <= 0) {
+        throw new HttpError(401, 'Se requiere iniciar sesión para consultar turnos.');
+      }
+      await exigirAccesoColaborador(req, colaboradorId);
+    }
+
     if (desde) {
       condiciones.push('t.fecha >= ?');
       parametros.push(desde);
@@ -532,7 +1037,7 @@ app.post(
   '/api/turnos/entrada',
   ruta(async (req, res) => {
     const body = req.body || {};
-    const colaborador = await exigirColaborador(body.colaborador_id);
+    const colaborador = await exigirAccesoColaborador(req, body.colaborador_id);
     if (!colaborador.activo) {
       throw new HttpError(400, 'El colaborador está inactivo.');
     }
@@ -561,6 +1066,7 @@ app.post(
     const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
+    await exigirAccesoColaborador(req, turno.colaborador_id);
     if (turno.salida) throw new HttpError(400, 'El turno ya está cerrado.');
     if (turno.pausa_inicio) {
       throw new HttpError(409, 'La pausa ya está iniciada.');
@@ -580,6 +1086,7 @@ app.post(
     const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
+    await exigirAccesoColaborador(req, turno.colaborador_id);
     if (!turno.pausa_inicio) {
       throw new HttpError(409, 'No hay una pausa en curso.');
     }
@@ -601,6 +1108,7 @@ app.post(
     const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
+    await exigirAccesoColaborador(req, turno.colaborador_id);
     if (turno.salida) throw new HttpError(409, 'El turno ya está cerrado.');
 
     const ahora = leerMomentoOpcional(body.momento);
@@ -627,6 +1135,7 @@ app.post(
     const body = req.body || {};
     const lista = Array.isArray(body.acciones) ? body.acciones.slice(0, 100) : [];
     let aplicadas = 0;
+    let rechazadas = 0;
 
     for (const item of lista) {
       const colaboradorId = Number(item && item.colaborador_id);
@@ -634,6 +1143,25 @@ app.post(
 
       const colaborador = await uno('SELECT * FROM colaboradores WHERE id = ?', [colaboradorId]);
       if (!colaborador) continue;
+
+      let autorizado = req.esAdmin || req.sesionColabId === colaboradorId;
+      if (!autorizado && item.token) {
+        const ses = verificarTokenSesion(String(item.token), req.secretoAuth);
+        if (
+          ses &&
+          (ses.rol === 'admin' ||
+            (ses.rol === 'colab' && Number(ses.colaborador_id) === colaboradorId))
+        ) {
+          autorizado = true;
+        }
+      }
+      if (!autorizado && !colaborador.pin_hash) {
+        autorizado = true;
+      }
+      if (!autorizado) {
+        rechazadas += 1;
+        continue;
+      }
 
       const tipo = String(item.tipo || '');
       const momento = leerMomentoOpcional(item.momento);
@@ -678,23 +1206,32 @@ app.post(
       }
     }
 
-    res.json({ ok: true, aplicadas });
+    if (lista.length > 0 && aplicadas === 0 && rechazadas > 0) {
+      throw new HttpError(
+        401,
+        'Ingresa tu PIN de 4 dígitos para sincronizar tus marcajes pendientes.'
+      );
+    }
+
+    res.json({ ok: true, aplicadas, rechazadas });
   })
 );
 
 app.post(
   '/api/turnos',
   ruta(async (req, res) => {
-    const colaborador = await exigirColaborador(req.body.colaborador_id);
+    exigirAdmin(req);
+    const body = req.body || {};
+    const colaborador = await exigirColaborador(body.colaborador_id);
 
-    const entrada = normalizarFechaHora(req.body.entrada, 'hora de entrada');
-    const salida = normalizarFechaHora(req.body.salida, 'hora de salida');
+    const entrada = normalizarFechaHora(body.entrada, 'hora de entrada');
+    const salida = normalizarFechaHora(body.salida, 'hora de salida');
     if (leerFechaHora(salida) <= leerFechaHora(entrada)) {
       throw new HttpError(400, 'La salida debe ser posterior a la entrada.');
     }
 
     const pausaMinutos = numeroNoNegativo(
-      req.body.pausa_minutos,
+      body.pausa_minutos,
       'La pausa',
       1440
     );
@@ -719,7 +1256,7 @@ app.post(
         entrada,
         salida,
         pausaMinutos,
-        texto(req.body.notas, 500),
+        texto(body.notas, 500),
         aISOlocal()
       ]
     );
@@ -731,15 +1268,17 @@ app.post(
 app.put(
   '/api/turnos/:id',
   ruta(async (req, res) => {
+    exigirAdmin(req);
+    const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
 
     const colaborador = await exigirColaborador(
-      req.body.colaborador_id ?? turno.colaborador_id
+      body.colaborador_id ?? turno.colaborador_id
     );
-    const entrada = normalizarFechaHora(req.body.entrada, 'hora de entrada');
-    const salida = req.body.salida
-      ? normalizarFechaHora(req.body.salida, 'hora de salida')
+    const entrada = normalizarFechaHora(body.entrada, 'hora de entrada');
+    const salida = body.salida
+      ? normalizarFechaHora(body.salida, 'hora de salida')
       : null;
 
     if (salida && leerFechaHora(salida) <= leerFechaHora(entrada)) {
@@ -747,7 +1286,7 @@ app.put(
     }
 
     let pausaMinutos = numeroNoNegativo(
-      req.body.pausa_minutos ?? turno.pausa_minutos,
+      body.pausa_minutos ?? turno.pausa_minutos,
       'La pausa',
       1440
     );
@@ -782,7 +1321,7 @@ app.put(
         salida,
         pausaInicio,
         redondear(pausaMinutos),
-        texto(req.body.notas, 500),
+        texto(body.notas, 500),
         turno.id
       ]
     );
@@ -794,6 +1333,7 @@ app.put(
 app.delete(
   '/api/turnos/:id',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     await ejecutar('DELETE FROM turnos WHERE id = ?', [turno.id]);
@@ -999,6 +1539,13 @@ app.get(
     const hasta = rango.hasta || hoy;
     const colaboradorId = Number(req.query.colaborador_id);
 
+    if (!req.esAdmin) {
+      if (!Number.isInteger(colaboradorId) || colaboradorId <= 0) {
+        throw new HttpError(401, 'Se requiere iniciar sesión para consultar reportes.');
+      }
+      await exigirAccesoColaborador(req, colaboradorId);
+    }
+
     res.json(
       await calcularReporte({
         desde,
@@ -1026,6 +1573,7 @@ function numeroCSV(valor) {
 app.get(
   '/api/reportes/csv',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const hoy = hoyISO();
     const rango = leerRango(req);
     const desde = rango.desde || `${hoy.slice(0, 8)}01`;
@@ -1122,6 +1670,7 @@ const exceljs = require('exceljs');
 app.get(
   '/api/reportes/excel',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const hoy = hoyISO();
     const rango = leerRango(req);
     const desde = rango.desde || `${hoy.slice(0, 8)}01`;
@@ -1437,13 +1986,19 @@ app.get(
 app.get(
   '/api/config',
   ruta(async (req, res) => {
-    res.json(await leerConfig());
+    const cfg = await leerConfig();
+    if (!req.esAdmin && !req.sesionColabId) {
+      res.json({ ...cfg, tarifa_hora_defecto: '0' });
+      return;
+    }
+    res.json(cfg);
   })
 );
 
 app.get(
   '/api/info',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     res.json({
       nombre_tienda: (await leerConfig()).nombre_tienda,
       version: VERSION,
@@ -1514,6 +2069,7 @@ async function volcarSQL() {
 app.get(
   '/api/respaldo',
   ruta(async (req, res, next) => {
+    exigirAdmin(req);
     if (esRemota) {
       const sql = await volcarSQL();
       res.setHeader('Content-Type', 'application/sql; charset=utf-8');
@@ -1537,6 +2093,7 @@ app.get(
 app.put(
   '/api/config',
   ruta(async (req, res) => {
+    exigirAdmin(req);
     const body = req.body || {};
     if (body.nombre_tienda !== undefined) {
       const nombre = texto(body.nombre_tienda, 60);

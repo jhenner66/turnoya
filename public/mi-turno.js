@@ -12,6 +12,8 @@ const $$ = (selector, raiz = document) => [...raiz.querySelectorAll(selector)];
 const CLAVE_PERSONA = 'turnoya_colaborador_id';
 const CLAVE_COLA = 'turnoya_cola_offline';
 const CLAVE_CACHE = 'turnoya_cache_colaborador';
+const CLAVE_AUTH_COLAB = 'turnoya_auth_colaboradores';
+const CLAVE_SESION_ACTIVA = 'turnoya_sesion_colab_id';
 const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const DIAS_CORTOS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 
@@ -210,6 +212,111 @@ function insigniaEstado(turno) {
    estado en vivo mientras no hay Internet y sube la cola al reconectar.
    ================================================================ */
 
+/* ================================================================
+   [ETIQUETA: CRIPTOGRAFÍA LOCAL (SHA-256) Y SESIÓN OFFLINE DEL COLABORADOR]
+   Qué hace: Verifica el PIN de 4 dígitos incluso sin Internet usando
+   el verificador SHA-256 entregado por el servidor y guarda tokens locales.
+   ================================================================ */
+
+function sha256Hex(texto) {
+  const bytes = new TextEncoder().encode(String(texto ?? ''));
+  const rightRotate = (v, amt) => (v >>> amt) | (v << (32 - amt));
+  const maxWord = 4294967296;
+  const words = [];
+  const bitLength = bytes.length * 8;
+  const hash = [];
+  const k = [];
+  let primeCounter = 0;
+  const isComposite = {};
+  for (let candidate = 2; primeCounter < 64; candidate += 1) {
+    if (!isComposite[candidate]) {
+      for (let i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+      hash[primeCounter] = (Math.pow(candidate, 0.5) * maxWord) | 0;
+      k[primeCounter++] = (Math.pow(candidate, 1 / 3) * maxWord) | 0;
+    }
+  }
+  const padded = new Uint8Array(bytes.length + 1 + ((64 - ((bytes.length + 9) % 64)) % 64) + 8);
+  padded.set(bytes, 0);
+  padded[bytes.length] = 0x80;
+  const view = new DataView(padded.buffer);
+  view.setUint32(padded.length - 8, Math.floor(bitLength / maxWord), false);
+  view.setUint32(padded.length - 4, bitLength >>> 0, false);
+
+  for (let i = 0; i < padded.length; i += 4) {
+    words.push(view.getUint32(i, false));
+  }
+
+  for (let j = 0; j < words.length; ) {
+    const w = words.slice(j, (j += 16));
+    const oldHash = hash.slice(0);
+    for (let i = 0; i < 64; i += 1) {
+      const w15 = w[i - 15];
+      const w2 = w[i - 2];
+      const a = hash[0];
+      const e = hash[4];
+      const temp1 =
+        hash[7] +
+        (rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25)) +
+        ((e & hash[5]) ^ (~e & hash[6])) +
+        k[i] +
+        (w[i] =
+          i < 16
+            ? w[i]
+            : (w[i - 16] +
+                (rightRotate(w15, 7) ^ rightRotate(w15, 18) ^ (w15 >>> 3)) +
+                w[i - 7] +
+                (rightRotate(w2, 17) ^ rightRotate(w2, 19) ^ (w2 >>> 10))) |
+              0);
+      const temp2 =
+        (rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22)) +
+        ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+      hash.unshift((temp1 + temp2) | 0);
+      hash.pop();
+      hash[4] = (hash[4] + temp1) | 0;
+    }
+    for (let i = 0; i < 8; i += 1) hash[i] = (hash[i] + oldHash[i]) | 0;
+  }
+  let res = '';
+  for (let i = 0; i < 8; i += 1) {
+    res += (hash[i] >>> 0).toString(16).padStart(8, '0');
+  }
+  return res;
+}
+
+function leerMapaAuthColab() {
+  try {
+    const crudo = localStorage.getItem(CLAVE_AUTH_COLAB);
+    const obj = crudo ? JSON.parse(crudo) : {};
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+function guardarAuthColab(colaboradorId, datos) {
+  try {
+    const mapa = leerMapaAuthColab();
+    mapa[String(colaboradorId)] = {
+      ...(mapa[String(colaboradorId)] || {}),
+      ...datos
+    };
+    localStorage.setItem(CLAVE_AUTH_COLAB, JSON.stringify(mapa));
+  } catch { /* ignorar */ }
+}
+
+function obtenerAuthColab(colaboradorId) {
+  if (!colaboradorId) return null;
+  const mapa = leerMapaAuthColab();
+  return mapa[String(colaboradorId)] || null;
+}
+
+function verificarPinOffline(colaboradorId, pin, verificador) {
+  if (!verificador || !String(verificador).includes(':')) return false;
+  const [sal, esperado] = String(verificador).split(':');
+  if (!sal || !esperado) return false;
+  return sha256Hex(`${sal}:${colaboradorId}:${pin}`) === esperado;
+}
+
 function leerColaOffline() {
   try {
     const crudo = localStorage.getItem(CLAVE_COLA);
@@ -229,8 +336,10 @@ function guardarColaOffline(lista) {
 
 function encolarAccionOffline(accion) {
   const cola = leerColaOffline();
+  const auth = obtenerAuthColab(accion.colaborador_id);
   cola.push({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    ...(auth && auth.token ? { token: auth.token } : {}),
     ...accion
   });
   guardarColaOffline(cola);
@@ -262,10 +371,18 @@ function guardarCacheLocal() {
 
 const cacheInicial = leerCacheLocal();
 
+const sesionActivaInicial = (() => {
+  const savedPersona = Number(localStorage.getItem(CLAVE_PERSONA)) || null;
+  const savedSesion = Number(localStorage.getItem(CLAVE_SESION_ACTIVA)) || null;
+  if (savedPersona && savedSesion && savedPersona === savedSesion) return savedPersona;
+  return null;
+})();
+
 const state = {
   online: navigator.onLine !== false,
   sincronizando: false,
-  colaboradorId: Number(localStorage.getItem(CLAVE_PERSONA)) || null,
+  syncRequierePin: false,
+  colaboradorId: sesionActivaInicial,
   colaboradores: (cacheInicial && cacheInicial.colaboradores) || [],
   estadoServidor: (cacheInicial && cacheInicial.estadoServidor) || { activos: [], resumen: {} },
   estado: { activos: [], resumen: {} },
@@ -383,15 +500,20 @@ function actualizarBannerCola() {
   if (!banner || !texto) return;
 
   if (!cola.length) {
+    state.syncRequierePin = false;
     banner.classList.add('hidden');
     return;
   }
 
   banner.classList.remove('hidden');
   const n = cola.length;
-  texto.textContent = state.sincronizando
-    ? `Subiendo ${n} marcaje${n === 1 ? '' : 's'} guardado${n === 1 ? '' : 's'} al servidor…`
-    : `☁️ ${n} marcaje${n === 1 ? '' : 's'} guardado${n === 1 ? '' : 's'} en tu teléfono · Se subirá${n === 1 ? '' : 'n'} automáticamente al volver Internet.`;
+  if (state.sincronizando) {
+    texto.textContent = `Subiendo ${n} marcaje${n === 1 ? '' : 's'} guardado${n === 1 ? '' : 's'} al servidor…`;
+  } else if (state.syncRequierePin) {
+    texto.textContent = `🔐 Toca "Subir ahora" e ingresa tu PIN para enviar ${n} marcaje${n === 1 ? '' : 's'} pendiente${n === 1 ? '' : 's'}.`;
+  } else {
+    texto.textContent = `☁️ ${n} marcaje${n === 1 ? '' : 's'} guardado${n === 1 ? '' : 's'} en tu teléfono · Se subirá${n === 1 ? '' : 'n'} automáticamente al volver Internet.`;
+  }
 }
 
 async function sincronizarColaOffline(silencioso = false) {
@@ -408,11 +530,36 @@ async function sincronizarColaOffline(silencioso = false) {
       method: 'POST',
       body: JSON.stringify({ acciones: cola })
     });
+    state.syncRequierePin = false;
     guardarColaOffline([]);
     toast(`✓ ${cola.length === 1 ? 'Marcaje pendiente subido' : `${cola.length} marcajes pendientes subidos`} al servidor.`);
     await cargarTodo();
     return true;
   } catch (error) {
+    if (!esErrorDeRed(error) && error && error.status === 401) {
+      state.syncRequierePin = true;
+      actualizarBannerCola();
+      if (!silencioso) {
+        const primerId = Number(cola[0] && cola[0].colaborador_id);
+        const personaPendiente = state.colaboradores.find((c) => c.id === primerId);
+        if (personaPendiente && personaPendiente.tiene_pin) {
+          abrirModalPinColaborador(personaPendiente, {
+            alAutenticar: ({ token }) => {
+              const actualizada = leerColaOffline().map((item) =>
+                Number(item.colaborador_id) === primerId && token
+                  ? { ...item, token }
+                  : item
+              );
+              guardarColaOffline(actualizada);
+              sincronizarColaOffline(true);
+            }
+          });
+        } else {
+          toast(error.message, 'error');
+        }
+      }
+      return false;
+    }
     if (!silencioso) {
       toast('Todavía no hay conexión. Tus marcajes siguen seguros en el teléfono.', 'error');
     }
@@ -439,9 +586,17 @@ async function api(ruta, opciones = {}) {
   const temporizador = setTimeout(() => controlador.abort(), 12000);
   const config = {
     ...opciones,
-    headers: { ...(opciones.headers || {}) },
+    headers: {
+      'X-TurnoYa-Cliente': '1',
+      ...(opciones.headers || {})
+    },
     signal: controlador.signal
   };
+  const colabIdToken = opciones.colaboradorIdToken || state.colaboradorId;
+  const authColab = obtenerAuthColab(colabIdToken);
+  if (authColab && authColab.token) {
+    config.headers['X-TurnoYa-Colab-Token'] = authColab.token;
+  }
   if (opciones.body !== undefined) {
     config.headers['Content-Type'] = 'application/json';
   }
@@ -461,7 +616,9 @@ async function api(ruta, opciones = {}) {
     }
     marcarConexion(true);
     if (!respuesta.ok) {
-      throw new Error((datos && datos.error) || `Error ${respuesta.status}`);
+      const err = new Error((datos && datos.error) || `Error ${respuesta.status}`);
+      err.status = respuesta.status;
+      throw err;
     }
     return datos;
   } catch (error) {
@@ -607,12 +764,13 @@ function renderListaPersonas() {
   contenedor.innerHTML = disponibles
     .map((c) => {
       const turno = activosPorId.get(c.id);
+      const iconoPin = c.tiene_pin ? '🔒 ' : '';
       return `
         <button type="button" class="worker-pick-card" data-elegir="${c.id}">
           <div class="avatar avatar-lg" data-hue="${colorAvatar(c.nombre)}">${escapar(iniciales(c.nombre))}</div>
           <div class="worker-pick-info">
             <strong>${escapar(c.nombre)}</strong>
-            <span>${escapar(c.puesto || 'Colaborador')}</span>
+            <span>${iconoPin}${escapar(c.puesto || 'Colaborador')}</span>
           </div>
           ${insigniaEstado(turno)}
         </button>
@@ -753,6 +911,16 @@ async function ejecutarOEncolarMarcaje({ tipo, turnoId, notas = '' }) {
       return;
     } catch (error) {
       if (!esErrorDeRed(error)) {
+        if (error && error.status === 401 && persona.tiene_pin) {
+          abrirModalPinColaborador(persona, {
+            alAutenticar: () => {
+              ejecutarOEncolarMarcaje({ tipo, turnoId, notas }).catch((e) =>
+                toast(e.message, 'error')
+              );
+            }
+          });
+          return;
+        }
         throw error;
       }
       // Si falló por falta de Internet, cae al guardado offline de abajo
@@ -809,6 +977,12 @@ async function cargarMisDatos(silencioso = false) {
     renderMiResumen(persona, state.reporte);
     renderMisRegistros(state.registros);
   } catch (error) {
+    if (!esErrorDeRed(error) && error && error.status === 401) {
+      if (persona.tiene_pin) {
+        cerrarSesionPersona({ silencioso: true });
+      }
+      return;
+    }
     recomputarEstadoConCola();
     if (state.reporte) renderMiResumen(persona, state.reporte);
     renderMisRegistros(state.registros);
@@ -980,17 +1154,178 @@ function renderMisRegistros(registros) {
   nota.textContent = `${registros.length} registro${registros.length === 1 ? '' : 's'} · ${formatoHoras(totalHoras)} trabajadas${notaPago}`;
 }
 
-function elegirPersona(id) {
+function activarPersonaAutenticada(id) {
   state.colaboradorId = id ? Number(id) : null;
   if (state.colaboradorId) {
     localStorage.setItem(CLAVE_PERSONA, String(state.colaboradorId));
+    localStorage.setItem(CLAVE_SESION_ACTIVA, String(state.colaboradorId));
   } else {
     localStorage.removeItem(CLAVE_PERSONA);
+    localStorage.removeItem(CLAVE_SESION_ACTIVA);
   }
   render();
   if (state.colaboradorId) {
     cargarMisDatos(true);
   }
+}
+
+function abrirModalPinColaborador(persona, { alAutenticar } = {}) {
+  const raiz = $('#modal-root');
+  raiz.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <div>
+            <h2>Hola, ${escapar(persona.nombre.split(' ')[0])}</h2>
+            <p class="muted">Ingresa tu PIN personal de 4 dígitos para entrar.</p>
+          </div>
+          <button type="button" class="icon-btn" data-cerrar aria-label="Cerrar">×</button>
+        </div>
+        <form id="form-pin-colaborador">
+          <div class="modal-body">
+            <label class="field">
+              <span>PIN personal (4 dígitos)</span>
+              <input type="password" class="pin-input" id="input-pin-colab" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="••••" autocomplete="off" required />
+            </label>
+            <p class="auth-error hidden" id="pin-colab-error"></p>
+          </div>
+          <div class="modal-foot">
+            <button type="button" class="btn ghost" data-cerrar>Cancelar</button>
+            <button type="submit" class="btn primary" id="btn-confirmar-pin">Entrar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+
+  const cerrar = () => { raiz.innerHTML = ''; };
+  $$('[data-cerrar]', raiz).forEach((b) => b.addEventListener('click', cerrar));
+
+  const input = $('#input-pin-colab', raiz);
+  const errEl = $('#pin-colab-error', raiz);
+  const btn = $('#btn-confirmar-pin', raiz);
+  setTimeout(() => input && input.focus(), 40);
+
+  $('#form-pin-colaborador', raiz).addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.classList.add('hidden');
+    const pin = String(input.value || '').trim();
+    if (!/^\d{4}$/.test(pin)) {
+      errEl.textContent = 'Escribe los 4 dígitos numéricos de tu PIN.';
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    btn.disabled = true;
+    try {
+      const resp = await api('/auth/colaborador/login', {
+        method: 'POST',
+        colaboradorIdToken: persona.id,
+        body: JSON.stringify({ colaborador_id: persona.id, pin })
+      });
+      guardarAuthColab(persona.id, {
+        token: resp.token || '',
+        verificador_offline: resp.verificador_offline || null,
+        tarifa_hora: resp.colaborador ? resp.colaborador.tarifa_hora : null
+      });
+      if (resp.colaborador) {
+        persona.tarifa_hora = resp.colaborador.tarifa_hora;
+      }
+      cerrar();
+      if (typeof alAutenticar === 'function') {
+        await alAutenticar(resp);
+      } else {
+        activarPersonaAutenticada(persona.id);
+      }
+    } catch (error) {
+      if (esErrorDeRed(error)) {
+        const authLocal = obtenerAuthColab(persona.id);
+        if (
+          authLocal &&
+          authLocal.verificador_offline &&
+          verificarPinOffline(persona.id, pin, authLocal.verificador_offline)
+        ) {
+          persona.tarifa_hora = authLocal.tarifa_hora ?? null;
+          cerrar();
+          toast('Acceso sin conexión verificado.');
+          if (typeof alAutenticar === 'function') {
+            await alAutenticar({ token: authLocal.token || '', offline: true });
+          } else {
+            activarPersonaAutenticada(persona.id);
+          }
+          return;
+        }
+        errEl.textContent =
+          authLocal && authLocal.verificador_offline
+            ? 'PIN incorrecto.'
+            : 'Necesitas Internet la primera vez que usas tu PIN en este teléfono.';
+      } else {
+        errEl.textContent = error.message;
+      }
+      errEl.classList.remove('hidden');
+      input.select();
+    } finally {
+      btn.disabled = false;
+    }
+  });
+}
+
+async function intentarElegirPersona(id) {
+  const persona = state.colaboradores.find((c) => c.id === Number(id));
+  if (!persona) return;
+
+  if (persona.tiene_pin) {
+    abrirModalPinColaborador(persona);
+    return;
+  }
+
+  try {
+    const resp = await api('/auth/colaborador/login', {
+      method: 'POST',
+      colaboradorIdToken: persona.id,
+      body: JSON.stringify({ colaborador_id: persona.id })
+    });
+    if (resp && resp.token) {
+      guardarAuthColab(persona.id, {
+        token: resp.token,
+        verificador_offline: null,
+        tarifa_hora: resp.colaborador ? resp.colaborador.tarifa_hora : null
+      });
+      if (resp.colaborador) persona.tarifa_hora = resp.colaborador.tarifa_hora;
+    }
+  } catch (err) {
+    if (!esErrorDeRed(err)) {
+      toast(err.message, 'error');
+      return;
+    }
+  }
+  activarPersonaAutenticada(persona.id);
+}
+
+function cerrarSesionPersona({ silencioso = false } = {}) {
+  const prevId = state.colaboradorId;
+  if (prevId) {
+    const prevAuth = obtenerAuthColab(prevId);
+    if (prevAuth) {
+      // Borra el token activo para exigir PIN de nuevo al tocar el perfil,
+      // conservando verificador_offline para desbloquear sin Internet.
+      guardarAuthColab(prevId, { token: null });
+    }
+  }
+  if (!silencioso) {
+    api('/auth/logout', {
+      method: 'POST',
+      body: JSON.stringify({ tipo: 'colab' })
+    }).catch(() => {});
+  }
+  state.colaboradorId = null;
+  state.reporte = null;
+  state.registrosServidor = [];
+  state.registros = [];
+  localStorage.removeItem(CLAVE_PERSONA);
+  localStorage.removeItem(CLAVE_SESION_ACTIVA);
+  guardarCacheLocal();
+  render();
 }
 
 function rangoRapido(tipo) {
@@ -1043,16 +1378,22 @@ function actualizarReloj() {
 }
 
 async function cargarTodo() {
-  const [config, colaboradores, estado] = await Promise.all([
+  const [config, colaboradores, estado, auth] = await Promise.all([
     api('/config'),
     api('/colaboradores'),
-    api('/estado')
+    api('/estado'),
+    api('/auth/estado').catch(() => null)
   ]);
 
   state.config = config;
-  state.colaboradores = colaboradores;
+  state.colaboradores = colaboradores.map((c) => {
+    const localAuth = obtenerAuthColab(c.id);
+    if (localAuth && localAuth.tarifa_hora !== undefined) {
+      return { ...c, tarifa_hora: localAuth.tarifa_hora };
+    }
+    return c;
+  });
   state.estadoServidor = estado;
-  guardarCacheLocal();
 
   if (estado && estado.fecha) {
     servidorHoy = estado.fecha;
@@ -1069,8 +1410,33 @@ async function cargarTodo() {
   if (state.colaboradorId && !colaboradorActual()) {
     state.colaboradorId = null;
     localStorage.removeItem(CLAVE_PERSONA);
+    localStorage.removeItem(CLAVE_SESION_ACTIVA);
   }
 
+  const persona = colaboradorActual();
+  if (persona && auth && Number(auth.colaborador_id) !== persona.id) {
+    if (!persona.tiene_pin) {
+      try {
+        const resp = await api('/auth/colaborador/login', {
+          method: 'POST',
+          colaboradorIdToken: persona.id,
+          body: JSON.stringify({ colaborador_id: persona.id })
+        });
+        if (resp && resp.token) {
+          guardarAuthColab(persona.id, {
+            token: resp.token,
+            verificador_offline: null,
+            tarifa_hora: resp.colaborador ? resp.colaborador.tarifa_hora : null
+          });
+          if (resp.colaborador) persona.tarifa_hora = resp.colaborador.tarifa_hora;
+        }
+      } catch { /* ignorar */ }
+    } else if (!auth.admin_autenticado) {
+      cerrarSesionPersona({ silencioso: true });
+    }
+  }
+
+  guardarCacheLocal();
   render();
   if (state.colaboradorId) {
     await cargarMisDatos(true);
@@ -1092,7 +1458,7 @@ function conectarEventos() {
   $('#lista-personas').addEventListener('click', (e) => {
     const boton = e.target.closest('[data-elegir]');
     if (!boton) return;
-    elegirPersona(Number(boton.dataset.elegir));
+    intentarElegirPersona(Number(boton.dataset.elegir));
   });
 
   $('#buscar-persona').addEventListener('input', (e) => {
@@ -1100,7 +1466,7 @@ function conectarEventos() {
     renderListaPersonas();
   });
 
-  $('#btn-cambiar-persona').addEventListener('click', () => elegirPersona(null));
+  $('#btn-cambiar-persona').addEventListener('click', () => cerrarSesionPersona());
 
   const navMovil = $('#worker-bottom-nav');
   if (navMovil) {

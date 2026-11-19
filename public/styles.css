@@ -1798,6 +1798,130 @@ textarea {
   }
 }
 
+/* [ETIQUETA: PANTALLA DE BLOQUEO, PIN Y SEGURIDAD] */
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(15, 23, 42, 0.86);
+  backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.auth-overlay.hidden {
+  display: none !important;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 28px 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+.auth-head {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.auth-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  margin-bottom: 12px;
+}
+
+.auth-badge svg {
+  width: 26px;
+  height: 26px;
+}
+
+.auth-head h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+
+.auth-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-form .field input {
+  width: 100%;
+}
+
+.auth-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auth-error.hidden {
+  display: none;
+}
+
+.auth-foot {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn.full,
+.auth-form .btn,
+.auth-foot .btn {
+  width: 100%;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.pin-input {
+  font-size: 28px !important;
+  letter-spacing: 12px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.lock-admin-btn {
+  width: 100%;
+  cursor: pointer;
+  margin-bottom: 8px;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
+.mobile-lock-pill {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink-soft);
+}
+
 /* Resumen del reporte */
 .report-summary {
   padding: 18px 20px;
