@@ -5,7 +5,7 @@
  * Qué hace: Define la versión de caché y la lista de archivos esenciales
  * para que la app y el portal /mi-turno abran aunque no haya Internet.
  * ================================================================== */
-const CACHE_NAME = 'turnoya-offline-v3';
+const CACHE_NAME = 'turnoya-offline-v4';
 const ARCHIVOS_BASE = [
   '/',
   '/mi-turno',

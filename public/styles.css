@@ -1798,7 +1798,27 @@ textarea {
   }
 }
 
-/* [ETIQUETA: PANTALLA DE BLOQUEO, PIN Y SEGURIDAD] */
+/* [ETIQUETA: PANTALLA DE BLOQUEO, PIN Y SCROLL INTERNO DE MODALES] */
+.modal > form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.modal-head,
+.modal-foot {
+  flex-shrink: 0;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .auth-overlay {
   position: fixed;
   inset: 0;
@@ -1809,6 +1829,7 @@ textarea {
   align-items: center;
   justify-content: center;
   padding: 20px;
+  overflow-y: auto;
 }
 
 .auth-overlay.hidden {
@@ -1818,6 +1839,9 @@ textarea {
 .auth-card {
   width: 100%;
   max-width: 420px;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -2522,9 +2546,17 @@ textarea {
   .modal,
   .modal.wide {
     max-width: 100%;
-    max-height: 92vh;
+    max-height: 88vh;
+    max-height: 88dvh;
     border-radius: 22px 22px 0 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  .modal-head {
+    padding: 14px 18px 12px;
+  }
+
+  .modal-body {
+    padding: 14px 18px;
   }
 
   .modal::before {
@@ -2539,6 +2571,7 @@ textarea {
 
   .modal-foot {
     flex-direction: column-reverse;
+    padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .modal-foot .btn {
