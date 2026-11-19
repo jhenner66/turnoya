@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <!-- [ETIQUETA: METADATOS DEL PORTAL DEL COLABORADOR] Configura título, PWA y hoja de estilos compartida. -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f172a" />
@@ -14,6 +15,7 @@
 </head>
 <body class="worker-body">
   <div class="worker-shell">
+    <!-- [ETIQUETA: ENCABEZADO DEL PORTAL] Nombre de la tienda, botón "Cambiar persona" y reloj en vivo. -->
     <header class="worker-header">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
@@ -42,6 +44,7 @@
       </div>
     </header>
 
+    <!-- [ETIQUETA: BANNERS DE ESTADO OFFLINE Y SINCRONIZACIÓN] Informa falta de red y marcajes pendientes por subir. -->
     <div class="connection-banner hidden" id="connection-banner" role="status">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 9v4"></path><path d="M12 17h.01"></path>
@@ -60,7 +63,7 @@
       <button class="btn small" id="btn-sincronizar-ahora" type="button">Subir ahora</button>
     </div>
 
-    <!-- PASO 1: Seleccionar quién eres -->
+    <!-- [ETIQUETA: PASO 1 - SELECTOR DE COLABORADOR] Lista con buscador para identificarse tocando su nombre. -->
     <section class="panel" id="vista-seleccion">
       <div class="panel-head">
         <div>
@@ -80,9 +83,9 @@
       </div>
     </section>
 
-    <!-- PASO 2: Panel personal del colaborador -->
+    <!-- [ETIQUETA: PASO 2 - PANEL PERSONAL DEL COLABORADOR] Fichaje, resumen de horas y mis registros (solo lectura). -->
     <main class="worker-main hidden" id="vista-panel">
-      <!-- Tarjeta de fichaje en vivo -->
+      <!-- [ETIQUETA: TARJETA DE FICHAJE EN VIVO] Muestra cronómetro, nota opcional y botones Entrada/Pausa/Salida. -->
       <section class="panel worker-punch-card" id="tarjeta-jornada">
         <div class="worker-punch-head">
           <div class="worker-person">
@@ -121,7 +124,7 @@
         <div class="worker-punch-actions" id="acciones-jornada"></div>
       </section>
 
-      <!-- Selector de periodo compartido entre Resumen y Registros -->
+      <!-- [ETIQUETA: SELECTOR DE PERIODO] Rangos rápidos y fechas compartidas entre Resumen y Registros. -->
       <section class="panel" id="seccion-filtros">
         <div class="panel-head wrap">
           <div>
@@ -150,7 +153,7 @@
         </form>
       </section>
 
-      <!-- Resumen personal -->
+      <!-- [ETIQUETA: RESUMEN PERSONAL] Texto explicativo y 4 métricas personales (horas, extra, días, pausas). -->
       <section class="panel" id="seccion-resumen">
         <div class="panel-head">
           <div>
@@ -164,7 +167,7 @@
         <div class="stat-grid worker-stats" id="mis-stats"></div>
       </section>
 
-      <!-- Tabla de mis registros -->
+      <!-- [ETIQUETA: MIS REGISTROS] Tabla solo lectura con el historial propio del colaborador en el periodo. -->
       <section class="panel" id="seccion-registros">
         <div class="panel-head">
           <div>
@@ -183,6 +186,7 @@
                 <th>Pausa</th>
                 <th>Horas</th>
                 <th>Extra del día</th>
+                <th>Pago</th>
                 <th>Estado</th>
               </tr>
             </thead>
@@ -193,7 +197,7 @@
         <p class="table-note" id="mis-registros-nota"></p>
       </section>
 
-      <!-- Barra inferior móvil del colaborador -->
+      <!-- [ETIQUETA: NAVEGACIÓN INFERIOR MÓVIL] Divide la pantalla del teléfono en 3 pestañas: Fichar, Mi resumen y Mis registros. -->
       <nav class="worker-bottom-nav" id="worker-bottom-nav" aria-label="Secciones del colaborador">
         <button class="nav-btn is-active" type="button" data-worker-tab="jornada">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

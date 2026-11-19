@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+  <!-- [ETIQUETA: METADATOS, PWA Y HOJA DE ESTILOS] Define idioma, vista móvil, manifiesto instalable e ícono SVG. -->
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#0f172a" />
@@ -14,6 +15,7 @@
 </head>
 <body>
   <div class="app">
+    <!-- [ETIQUETA: BARRA LATERAL / NAVEGACIÓN PRINCIPAL] Menú fijo en PC y barra inferior en móvil. -->
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark" aria-hidden="true">
@@ -80,6 +82,7 @@
     </aside>
 
     <main class="main">
+      <!-- [ETIQUETA: BARRA SUPERIOR Y RELOJ EN VIVO] Muestra título de sección, acceso rápido en móvil y reloj actual. -->
       <header class="topbar">
         <div class="topbar-title">
           <div class="mobile-brand-bar">
@@ -97,6 +100,7 @@
       </header>
 
       <div class="content">
+        <!-- [ETIQUETA: BANNER DE CONEXIÓN] Avisa cuando el servidor no responde y ofrece reintento manual. -->
         <div class="connection-banner hidden" id="connection-banner" role="status">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 9v4"></path><path d="M12 17h.01"></path>
@@ -106,7 +110,7 @@
           <button class="btn small" id="btn-reintentar-conexion" type="button">Reintentar</button>
         </div>
 
-        <!-- INICIO -->
+        <!-- [ETIQUETA: VISTA INICIO] Tablero en vivo con estadísticas, filtros de estado, tarjetas del personal y botón flotante móvil. -->
         <section class="view" id="view-inicio">
           <div class="stat-grid" id="inicio-stats">
             <div class="skeleton-stat"></div><div class="skeleton-stat"></div>
@@ -145,7 +149,7 @@
           </button>
         </section>
 
-        <!-- COLABORADORES -->
+        <!-- [ETIQUETA: VISTA COLABORADORES] Directorio y gestión (crear, editar, activar/desactivar, eliminar). -->
         <section class="view hidden" id="view-colaboradores">
           <div class="panel">
             <div class="panel-head">
@@ -172,6 +176,7 @@
                     <th>Colaborador</th>
                     <th>Puesto</th>
                     <th>Contacto</th>
+                    <th>Tarifa / hora</th>
                     <th>Estado</th>
                     <th class="right">Acciones</th>
                   </tr>
@@ -182,7 +187,7 @@
           </div>
         </section>
 
-        <!-- REGISTROS -->
+        <!-- [ETIQUETA: VISTA REGISTROS] Historial de jornadas con filtros, registro manual, corrección y exportación Excel. -->
         <section class="view hidden" id="view-registros">
           <div class="panel">
             <div class="panel-head wrap">
@@ -251,7 +256,7 @@
           </div>
         </section>
 
-        <!-- REPORTES -->
+        <!-- [ETIQUETA: VISTA REPORTES] Resumen humano, totales, tabla desplegable por colaborador, detalle por día e impresión. -->
         <section class="view hidden" id="view-reportes">
           <div class="print-header" id="print-header">
             <strong id="print-store">Mi Tienda</strong>
@@ -327,6 +332,8 @@
                     <th class="right">Pausas</th>
                     <th class="right">Horas</th>
                     <th class="right">Horas extra</th>
+                    <th class="right">Tarifa/h</th>
+                    <th class="right">Pago</th>
                   </tr>
                 </thead>
                 <tbody id="tabla-reporte-colabs"></tbody>
@@ -350,6 +357,7 @@
                     <th class="right">Pausas</th>
                     <th class="right">Horas</th>
                     <th class="right">Horas extra</th>
+                    <th class="right">Pago</th>
                   </tr>
                 </thead>
                 <tbody id="tabla-reporte-dias"></tbody>
@@ -359,7 +367,7 @@
 
         </section>
 
-        <!-- AJUSTES -->
+        <!-- [ETIQUETA: VISTA AJUSTES] Configuración de tienda/jornada, enlaces para /mi-turno y APK, info técnica y respaldos. -->
         <section class="view hidden" id="view-ajustes">
           <div class="panel">
             <div class="panel-head">
@@ -377,10 +385,18 @@
                 <span>Jornada diaria (horas)</span>
                 <input type="number" id="config-jornada" min="1" max="24" step="0.5" required title="Horas normales de trabajo por día. Lo que pase de aquí cuenta como horas extra." />
               </label>
+              <label>
+                <span>Moneda</span>
+                <input type="text" id="config-moneda" maxlength="8" placeholder="S/" required />
+              </label>
+              <label>
+                <span>Tarifa por hora por defecto</span>
+                <input type="number" id="config-tarifa-defecto" min="0" max="100000" step="0.01" placeholder="0.00" title="Pago por hora normal y extra (1x) cuando el colaborador no tenga tarifa propia." />
+              </label>
               <button class="btn primary" type="submit">Guardar ajustes</button>
             </form>
             <p class="muted small">
-              Las horas que superen la jornada diaria se cuentan como horas extra en los reportes.
+              Las horas que superen la jornada diaria se cuentan como horas extra en los reportes. Tanto horas normales como extra se calculan a 1x según la tarifa de cada colaborador (o la tarifa por defecto si no tiene una propia).
             </p>
           </div>
 
@@ -471,6 +487,7 @@
     </main>
   </div>
 
+  <!-- [ETIQUETA: CONTENEDORES GLOBALES Y SCRIPT PRINCIPAL] Modales dinámicos, notificaciones toast y app.js. -->
   <div id="modal-root"></div>
   <div id="toast-root" class="toast-root" aria-live="polite"></div>
 

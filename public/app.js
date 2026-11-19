@@ -1,7 +1,9 @@
 'use strict';
 
 /* ================================================================
-   Estado y utilidades
+   [ETIQUETA: ESTADO GLOBAL, CONSTANTES Y UTILIDADES]
+   Qué hace: Almacena el estado de la interfaz, títulos, íconos SVG,
+   formateadores de fecha/hora, colores de avatar y cliente HTTP `/api`.
    ================================================================ */
 
 const $ = (selector, raiz = document) => raiz.querySelector(selector);
@@ -11,7 +13,7 @@ const TITULOS = {
   inicio: ['Inicio', 'Marca entradas, pausas y salidas del personal.'],
   colaboradores: ['Colaboradores', 'Administra al equipo de la tienda.'],
   registros: ['Registros', 'Consulta y corrige las jornadas registradas.'],
-  reportes: ['Reportes', 'Horas trabajadas, pausas y horas extra.'],
+  reportes: ['Reportes', 'Horas trabajadas, pausas, horas extra y pago estimado.'],
   ajustes: ['Ajustes', 'Datos de la tienda, acceso desde el celular y respaldos.']
 };
 
@@ -28,7 +30,9 @@ const ICONOS = {
   calendario:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>',
   extra:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
+  pago:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2.5"></circle><path d="M6 12h.01M18 12h.01"></path></svg>',
   lupa:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>'
 };
@@ -103,7 +107,12 @@ const state = {
   online: true,
   colaboradores: [],
   estado: { activos: [], resumen: {} },
-  config: { nombre_tienda: 'Mi Tienda', jornada_horas: '8' },
+  config: {
+    nombre_tienda: 'Mi Tienda',
+    jornada_horas: '8',
+    moneda: 'S/',
+    tarifa_hora_defecto: '0'
+  },
   info: null,
   reporte: null,
   reporteColaboradorAbierto: null,
@@ -121,6 +130,31 @@ function formatoHoras(horas) {
   const minutos = Math.round(Number(horas || 0) * 60);
   if (minutos <= 0) return '0 h';
   return formatoMinutos(minutos);
+}
+
+function monedaActual(override) {
+  return String(override || state.config.moneda || 'S/').trim() || 'S/';
+}
+
+function formatoMoneda(monto, moneda) {
+  const numero = Number(monto || 0);
+  const textoNum = new Intl.NumberFormat('es-PE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(numero) ? numero : 0);
+  return `${monedaActual(moneda)} ${textoNum}`;
+}
+
+function tarifaEfectiva(colaborador) {
+  if (
+    colaborador &&
+    colaborador.tarifa_hora !== null &&
+    colaborador.tarifa_hora !== undefined &&
+    colaborador.tarifa_hora !== ''
+  ) {
+    return { valor: Number(colaborador.tarifa_hora) || 0, propia: true };
+  }
+  return { valor: Number(state.config.tarifa_hora_defecto || 0) || 0, propia: false };
 }
 
 // La CSP del servidor bloquea atributos style="" en el HTML, así que los
@@ -274,7 +308,8 @@ async function reintentarConexion(silencioso = false) {
 }
 
 /* ================================================================
-   Notificaciones
+   [ETIQUETA: NOTIFICACIONES TOAST]
+   Qué hace: Muestra avisos flotantes temporales de éxito o error.
    ================================================================ */
 
 function toast(mensaje, tipo = 'ok') {
@@ -294,7 +329,9 @@ function toast(mensaje, tipo = 'ok') {
 }
 
 /* ================================================================
-   Modal genérico
+   [ETIQUETA: SISTEMA DE MODALES Y CONFIRMACIONES]
+   Qué hace: Abre cuadros de diálogo reutilizables (y Bottom Sheet en móvil)
+   para formularios de edición y confirmaciones antes de acciones críticas.
    ================================================================ */
 
 let cerrarModalActual = null;
@@ -393,7 +430,9 @@ function confirmar({ titulo, mensaje, textoConfirmar = 'Eliminar', peligro = tru
 }
 
 /* ================================================================
-   Inicio
+   [ETIQUETA: MÓDULO INICIO Y FICHAJE EN VIVO]
+   Qué hace: Dibuja las estadísticas del día, filtros por estado, bienvenida,
+   tarjetas del personal con cronómetro y modal de entrada rápida (FAB).
    ================================================================ */
 
 function renderInicio() {
@@ -655,7 +694,8 @@ async function refrescarEstado(silencioso = false) {
 }
 
 /* ================================================================
-   Colaboradores
+   [ETIQUETA: MÓDULO COLABORADORES (CRUD)]
+   Qué hace: Lista, busca, crea, edita y elimina integrantes del equipo.
    ================================================================ */
 
 function renderColaboradores() {
@@ -671,7 +711,7 @@ function renderColaboradores() {
   if (!lista.length) {
     cuerpo.innerHTML = `
       <tr class="empty-row">
-        <td colspan="5">
+        <td colspan="6">
           <div class="empty-inline">
             <p>${
               state.colaboradores.length
@@ -693,6 +733,13 @@ function renderColaboradores() {
   cuerpo.innerHTML = lista
     .map((colaborador) => {
       const contacto = [colaborador.email, colaborador.telefono].filter(Boolean);
+      const tarifa = tarifaEfectiva(colaborador);
+      const textoTarifa =
+        tarifa.valor > 0
+          ? `${formatoMoneda(tarifa.valor)}${tarifa.propia ? '' : ' <span class="muted small">(General)</span>'}`
+          : tarifa.propia
+            ? formatoMoneda(0)
+            : '<span class="muted">Sin tarifa</span>';
       return `
         <tr>
           <td data-label="Colaborador">
@@ -706,6 +753,7 @@ function renderColaboradores() {
           </td>
           <td data-label="Puesto">${escapar(colaborador.puesto || '—')}</td>
           <td data-label="Contacto">${contacto.length ? escapar(contacto.join(' · ')) : '—'}</td>
+          <td class="cell-mono" data-label="Tarifa / hora">${textoTarifa}</td>
           <td data-label="Estado">
             <span class="badge ${colaborador.activo ? 'badge-on' : 'badge-off'}">
               ${colaborador.activo ? 'Activo' : 'Inactivo'}
@@ -730,6 +778,17 @@ function renderColaboradores() {
 
 function abrirModalColaborador(colaborador = null) {
   const esEdicion = Boolean(colaborador);
+  const moneda = monedaActual();
+  const tarifaDefecto = Number(state.config.tarifa_hora_defecto || 0);
+  const valorTarifa =
+    colaborador && colaborador.tarifa_hora !== null && colaborador.tarifa_hora !== undefined
+      ? colaborador.tarifa_hora
+      : '';
+  const placeholderTarifa =
+    tarifaDefecto > 0
+      ? `Vacío = tarifa general (${formatoMoneda(tarifaDefecto, moneda)})`
+      : 'Vacío = usar tarifa general';
+
   abrirModal({
     titulo: esEdicion ? 'Editar colaborador' : 'Nuevo colaborador',
     subtitulo: esEdicion
@@ -744,11 +803,18 @@ function abrirModalColaborador(colaborador = null) {
             value="${escapar(colaborador ? colaborador.nombre : '')}"
             placeholder="Ej. Ana Martínez" autocomplete="off" />
         </label>
-        <label class="field full">
+        <label class="field">
           <span>Puesto</span>
           <input type="text" name="puesto" maxlength="80"
             value="${escapar(colaborador ? colaborador.puesto : '')}"
             placeholder="Ej. Cajera, Vendedor, Supervisor" autocomplete="off" />
+        </label>
+        <label class="field">
+          <span>Tarifa por hora (${escapar(moneda)})</span>
+          <input type="number" name="tarifa_hora" min="0" max="100000" step="0.01"
+            value="${escapar(valorTarifa)}"
+            placeholder="${escapar(placeholderTarifa)}" autocomplete="off" />
+          <small class="field-hint">Aplica igual a horas normales y extra (1x).</small>
         </label>
         <label class="field">
           <span>Correo electrónico</span>
@@ -769,11 +835,18 @@ function abrirModalColaborador(colaborador = null) {
       </div>
     `,
     onGuardar: async (datos) => {
+      const tarifaTexto = String(datos.get('tarifa_hora') ?? '').trim();
+      const tarifaNum = tarifaTexto === '' ? null : Number(tarifaTexto);
+      if (tarifaNum !== null && (!Number.isFinite(tarifaNum) || tarifaNum < 0)) {
+        throw new Error('La tarifa por hora debe ser un número mayor o igual a 0.');
+      }
+
       const cuerpo = {
         nombre: datos.get('nombre'),
         puesto: datos.get('puesto'),
         email: datos.get('email'),
         telefono: datos.get('telefono'),
+        tarifa_hora: tarifaNum,
         activo: datos.get('activo') === 'on'
       };
       if (!String(cuerpo.nombre || '').trim()) {
@@ -793,7 +866,7 @@ function abrirModalColaborador(colaborador = null) {
         toast('Colaborador agregado.');
       }
       await recargarColaboradores();
-      await refrescarEstado(true);
+      await Promise.all([refrescarEstado(true), cargarReporte(true)]);
     }
   });
 }
@@ -849,7 +922,9 @@ function renderSelects() {
 }
 
 /* ================================================================
-   Registros
+   [ETIQUETA: MÓDULO REGISTROS DE JORNADA]
+   Qué hace: Consulta turnos filtrados, calcula duración previa en vivo
+   y permite crear, corregir, pausar, cerrar o eliminar turnos.
    ================================================================ */
 
 async function cargarRegistros(silencioso = false) {
@@ -1150,7 +1225,9 @@ function confirmarEliminarRegistro(turno) {
 }
 
 /* ================================================================
-   Reportes
+   [ETIQUETA: MÓDULO REPORTES, DETALLE DESPLEGABLE Y EXCEL]
+   Qué hace: Renderiza resumen en texto humano, estadísticas, barras de
+   progreso, detalle desplegable por colaborador y descarga en Excel.
    ================================================================ */
 
 async function cargarReporte(silencioso = false) {
@@ -1175,6 +1252,7 @@ function renderReporte() {
 
   renderResumenReporte(reporte);
 
+  const moneda = monedaActual(reporte.moneda);
   $('#reporte-stats').innerHTML = `
     <div class="stat-card" data-tooltip="Suma de horas de todos, descontando pausas">
       <div class="stat-icon blue">${ICONOS.reloj}</div>
@@ -1204,6 +1282,13 @@ function renderReporte() {
         <span class="stat-label">Colaboradores</span>
       </div>
     </div>
+    <div class="stat-card" data-tooltip="Pago total calculado (horas × tarifa por hora)">
+      <div class="stat-icon emerald">${ICONOS.pago}</div>
+      <div class="stat-body">
+        <span class="stat-value">${formatoMoneda(reporte.totales.pago || 0, moneda)}</span>
+        <span class="stat-label">Pago estimado</span>
+      </div>
+    </div>
   `;
 
   const textoRango = `Del ${fechaCorta(reporte.desde)} al ${fechaCorta(
@@ -1216,7 +1301,7 @@ function renderReporte() {
   if (!reporte.por_colaborador.length) {
     cuerpoColabs.innerHTML = `
       <tr class="empty-row">
-        <td colspan="7">No hay turnos completados en este rango de fechas.</td>
+        <td colspan="9">No hay turnos completados en este rango de fechas.</td>
       </tr>
     `;
   } else {
@@ -1224,6 +1309,7 @@ function renderReporte() {
       reporte.por_colaborador
         .map((colaborador) => {
           const abierto = state.reporteColaboradorAbierto === colaborador.colaborador_id;
+          const etiquetaTarifa = colaborador.tarifa_propia ? 'Tarifa propia' : 'Tarifa general';
           return `
             <tr class="colab-summary-row${abierto ? ' is-open' : ''}" data-colab-detalle="${colaborador.colaborador_id}" tabindex="0" role="button" aria-expanded="${abierto}">
               <td data-label="Colaborador">
@@ -1252,23 +1338,27 @@ function renderReporte() {
                 </div>
               </td>
               <td class="right cell-mono${colaborador.extra ? ' cell-extra-on' : ''}" data-label="Horas extra">${colaborador.extra ? formatoHoras(colaborador.extra) : '—'}</td>
+              <td class="right cell-mono" data-label="Tarifa/h" title="${etiquetaTarifa}">${colaborador.tarifa_hora > 0 ? formatoMoneda(colaborador.tarifa_hora, moneda) : '<span class="muted">—</span>'}</td>
+              <td class="right cell-mono${colaborador.pago > 0 ? ' cell-pay' : ''}" data-label="Pago">${colaborador.pago > 0 ? formatoMoneda(colaborador.pago, moneda) : '—'}</td>
             </tr>
             ${abierto ? renderDetalleColaboradorFila(colaborador, reporte) : ''}
           `;
         })
         .join('') +
       filaTotales(
-        7,
+        9,
         [
-          `Totales`,
+          'Totales',
           '',
           reporte.totales.dias,
           reporte.totales.turnos,
           formatoMinutos(reporte.totales.pausa_minutos),
           formatoHoras(reporte.totales.horas),
-          formatoHoras(reporte.totales.extra)
+          formatoHoras(reporte.totales.extra),
+          '',
+          formatoMoneda(reporte.totales.pago || 0, moneda)
         ],
-        ['', '', 'Días', 'Turnos', 'Pausas', 'Horas', 'Horas extra']
+        ['', '', 'Días', 'Turnos', 'Pausas', 'Horas', 'Horas extra', '', 'Pago estimado']
       );
   }
 
@@ -1276,7 +1366,7 @@ function renderReporte() {
   if (!reporte.por_dia.length) {
     cuerpoDias.innerHTML = `
       <tr class="empty-row">
-        <td colspan="5">No hay turnos completados en este rango de fechas.</td>
+        <td colspan="6">No hay turnos completados en este rango de fechas.</td>
       </tr>
     `;
   } else {
@@ -1290,20 +1380,22 @@ function renderReporte() {
               <td class="right cell-mono" data-label="Pausas">${dia.pausa_minutos ? formatoMinutos(dia.pausa_minutos) : '—'}</td>
               <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(dia.horas)}</strong></td>
               <td class="right cell-mono${dia.extra ? ' cell-extra-on' : ''}" data-label="Horas extra">${dia.extra ? formatoHoras(dia.extra) : '—'}</td>
+              <td class="right cell-mono${dia.pago > 0 ? ' cell-pay' : ''}" data-label="Pago">${dia.pago > 0 ? formatoMoneda(dia.pago, moneda) : '—'}</td>
             </tr>
           `
         )
         .join('') +
       filaTotales(
-        5,
+        6,
         [
           'Totales',
           reporte.totales.turnos,
           formatoMinutos(reporte.totales.pausa_minutos),
           formatoHoras(reporte.totales.horas),
-          formatoHoras(reporte.totales.extra)
+          formatoHoras(reporte.totales.extra),
+          formatoMoneda(reporte.totales.pago || 0, moneda)
         ],
-        ['', 'Turnos', 'Pausas', 'Horas', 'Horas extra']
+        ['', 'Turnos', 'Pausas', 'Horas', 'Horas extra', 'Pago estimado']
       );
   }
   aplicarEstilosDinamicos(cuerpoColabs);
@@ -1324,6 +1416,7 @@ function renderDetalleColaboradorFila(colaborador, reporte) {
           <td class="right cell-mono" data-label="Pausa">${turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—'}</td>
           <td class="right cell-mono" data-label="Horas"><strong>${formatoHoras(turno.horas)}</strong></td>
           <td class="right cell-mono${turno.extra_dia ? ' cell-extra-on' : ''}" data-label="Extra del día">${turno.extra_dia ? formatoHoras(turno.extra_dia) : '—'}</td>
+          <td class="right cell-mono${turno.pago > 0 ? ' cell-pay' : ''}" data-label="Pago">${turno.pago > 0 ? formatoMoneda(turno.pago, reporte.moneda) : '—'}</td>
           <td class="colab-detail-note" data-label="Notas">${turno.notas ? escapar(turno.notas) : '<span class="muted">—</span>'}</td>
         </tr>
       `
@@ -1332,7 +1425,7 @@ function renderDetalleColaboradorFila(colaborador, reporte) {
 
   return `
     <tr class="colab-detail-row">
-      <td colspan="7">
+      <td colspan="9">
         <div class="colab-detail-box">
           <div class="colab-detail-head">
             <div>
@@ -1356,6 +1449,7 @@ function renderDetalleColaboradorFila(colaborador, reporte) {
                   <th class="right">Pausa</th>
                   <th class="right">Horas</th>
                   <th class="right">Extra del día</th>
+                  <th class="right">Pago</th>
                   <th>Notas</th>
                 </tr>
               </thead>
@@ -1389,6 +1483,9 @@ function renderResumenReporte(reporte) {
     partes.push(`Se acumularon <strong class="cell-extra-on">${formatoHoras(t.extra)} de horas extra</strong> (más de ${formatoHoras(reporte.umbral)} al día).`);
   } else {
     partes.push('Nadie superó la jornada diaria: <strong>sin horas extra</strong>. 👍');
+  }
+  if (t.pago > 0) {
+    partes.push(`El pago total estimado es <strong class="cell-pay">${formatoMoneda(t.pago, reporte.moneda)}</strong>.`);
   }
   const top = reporte.por_colaborador[0];
   if (top && t.colaboradores > 1) {
@@ -1426,7 +1523,9 @@ function descargarExcel(filtros) {
 }
 
 /* ================================================================
-   Reloj en vivo
+   [ETIQUETA: RELOJ Y CRONÓMETROS EN VIVO]
+   Qué hace: Actualiza cada segundo el reloj superior y los contadores
+   activos de tiempo trabajado y pausas en curso.
    ================================================================ */
 
 function actualizarReloj() {
@@ -1457,7 +1556,9 @@ function actualizarReloj() {
 }
 
 /* ================================================================
-   Navegación y eventos
+   [ETIQUETA: NAVEGACIÓN, AJUSTES, COLA OFFLINE Y EVENTOS]
+   Qué hace: Cambia vistas, aplica rangos rápidos, gestiona enlaces LAN y
+   /mi-turno, respalda cola offline local y conecta todos los eventos DOM.
    ================================================================ */
 
 function cambiarVista(vista) {
@@ -1511,6 +1612,10 @@ function aplicarConfig() {
   document.title = `Control de Horas · ${nombre}`;
   $('#config-nombre').value = nombre;
   $('#config-jornada').value = state.config.jornada_horas || 8;
+  if ($('#config-moneda')) $('#config-moneda').value = monedaActual();
+  if ($('#config-tarifa-defecto')) {
+    $('#config-tarifa-defecto').value = state.config.tarifa_hora_defecto ?? '0';
+  }
 }
 
 function renderAccesoCelular(info) {
@@ -2111,14 +2216,22 @@ function conectarEventos() {
     const boton = evento.target.querySelector('button[type="submit"]');
     boton.disabled = true;
     try {
+      const payload = {
+        nombre_tienda: $('#config-nombre').value,
+        jornada_horas: Number($('#config-jornada').value)
+      };
+      if ($('#config-moneda')) {
+        payload.moneda = $('#config-moneda').value.trim() || 'S/';
+      }
+      if ($('#config-tarifa-defecto')) {
+        payload.tarifa_hora_defecto = Number($('#config-tarifa-defecto').value || 0);
+      }
       state.config = await api('/config', {
         method: 'PUT',
-        body: JSON.stringify({
-          nombre_tienda: $('#config-nombre').value,
-          jornada_horas: Number($('#config-jornada').value)
-        })
+        body: JSON.stringify(payload)
       });
       aplicarConfig();
+      renderColaboradores();
       await cargarReporte(true);
       toast('Ajustes guardados.');
     } catch (error) {
@@ -2137,7 +2250,9 @@ function aplicarFechasPorDefecto() {
 }
 
 /* ================================================================
-   Arranque
+   [ETIQUETA: ARRANQUE DE LA APLICACIÓN ADMIN]
+   Qué hace: Registra el Service Worker offline, carga datos iniciales y
+   configura el refresco automático periódico y al volver a la pestaña.
    ================================================================ */
 
 async function iniciar() {

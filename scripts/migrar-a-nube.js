@@ -1,15 +1,9 @@
-/*
- * Copia los datos de la base local (data/tienda.db) a la base en la nube
- * (Turso). Uso:
- *
- *   node scripts/migrar-a-nube.js
- *
- * Las credenciales se leen de .env.local o de las variables de entorno
- * TURSO_DATABASE_URL y TURSO_AUTH_TOKEN.
- *
- * El script reemplaza el contenido de las tablas en la nube con el de la
- * base local, así que se puede ejecutar más de una vez sin duplicar datos.
- */
+/* ==================================================================
+ * [ETIQUETA: SCRIPT DE MIGRACIÓN LOCAL -> NUBE (TURSO)]
+ * Qué hace: Copia las tablas de la base local `data/tienda.db` a Turso
+ * usando las credenciales de `.env.local` o variables de entorno.
+ * Uso: node scripts/migrar-a-nube.js
+ * ================================================================== */
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -53,10 +47,11 @@ const local = createClient({
 const nube = createClient({ url: urlRemota, authToken: tokenRemoto || undefined });
 
 const TABLAS = ['colaboradores', 'turnos', 'configuracion'];
+const imprimir = (linea = '') => process.stdout.write(`${linea}\n`);
 
 async function main() {
-  console.log('Origen : data/tienda.db');
-  console.log(`Destino: ${urlRemota.split('?')[0]}`);
+  imprimir('Origen : data/tienda.db');
+  imprimir(`Destino: ${urlRemota.split('?')[0]}`);
 
   const resumen = {};
 
@@ -65,7 +60,7 @@ async function main() {
     resumen[tabla] = filas.length;
 
     if (!filas.length) {
-      console.log(`  ${tabla}: sin datos, se omite.`);
+      imprimir(`  ${tabla}: sin datos, se omite.`);
       continue;
     }
 
@@ -82,7 +77,7 @@ async function main() {
     }
 
     await nube.batch(sentencias, 'write');
-    console.log(`  ${tabla}: ${filas.length} fila(s) copiadas.`);
+    imprimir(`  ${tabla}: ${filas.length} fila(s) copiadas.`);
   }
 
   // Comprobación rápida.
@@ -96,8 +91,8 @@ async function main() {
     }
   }
 
-  console.log('\nMigración completada y verificada.');
-  console.log(`Respaldo SQL de la base anterior: usa /api/respaldo en local si lo necesitas.`);
+  imprimir('\nMigración completada y verificada.');
+  imprimir('Respaldo SQL de la base anterior: usa /api/respaldo en local si lo necesitas.');
 }
 
 main()

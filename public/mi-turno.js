@@ -1,5 +1,11 @@
 'use strict';
 
+/* ================================================================
+   [ETIQUETA: CONSTANTES, ICONOS Y UTILIDADES DEL PORTAL]
+   Qué hace: Define selectores DOM, claves de almacenamiento local,
+   iconos SVG y funciones de formato de fechas, horas y avatares.
+   ================================================================ */
+
 const $ = (selector, raiz = document) => raiz.querySelector(selector);
 const $$ = (selector, raiz = document) => [...raiz.querySelectorAll(selector)];
 
@@ -17,7 +23,9 @@ const ICONOS = {
   calendario:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><path d="M16 2v4M8 2v4M3 10h18"></path></svg>',
   extra:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>',
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>',
+  pago:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2.5"></circle><path d="M6 12h.01M18 12h.01"></path></svg>',
   usuarios:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle></svg>'
 };
@@ -145,6 +153,34 @@ function formatoHoras(horas) {
   return formatoMinutos(minutos);
 }
 
+function monedaActual(override) {
+  return String(override || (state && state.config && state.config.moneda) || 'S/').trim() || 'S/';
+}
+
+function formatoMoneda(monto, moneda) {
+  const numero = Number(monto || 0);
+  const textoNum = new Intl.NumberFormat('es-PE', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(numero) ? numero : 0);
+  return `${monedaActual(moneda)} ${textoNum}`;
+}
+
+function tarifaEfectivaPersona(persona) {
+  if (
+    persona &&
+    persona.tarifa_hora !== null &&
+    persona.tarifa_hora !== undefined &&
+    persona.tarifa_hora !== ''
+  ) {
+    return Number(persona.tarifa_hora) || 0;
+  }
+  if (state.reporte && state.reporte.tarifa_defecto !== undefined) {
+    return Number(state.reporte.tarifa_defecto) || 0;
+  }
+  return Number((state.config && state.config.tarifa_hora_defecto) || 0) || 0;
+}
+
 function duracionDesdeDatos({ entrada, pausaMin, pausaInicio }) {
   if (!entrada) return '0 min';
   const inicio = parseLocal(entrada);
@@ -169,7 +205,9 @@ function insigniaEstado(turno) {
 }
 
 /* ================================================================
-   Cola Offline y Caché en el Teléfono
+   [ETIQUETA: COLA OFFLINE, CACHÉ LOCAL Y SINCRONIZACIÓN]
+   Qué hace: Guarda marcajes sin conexión en localStorage, proyecta el
+   estado en vivo mientras no hay Internet y sube la cola al reconectar.
    ================================================================ */
 
 function leerColaOffline() {
@@ -231,7 +269,12 @@ const state = {
   colaboradores: (cacheInicial && cacheInicial.colaboradores) || [],
   estadoServidor: (cacheInicial && cacheInicial.estadoServidor) || { activos: [], resumen: {} },
   estado: { activos: [], resumen: {} },
-  config: (cacheInicial && cacheInicial.config) || { nombre_tienda: 'Mi Tienda', jornada_horas: '8' },
+  config: (cacheInicial && cacheInicial.config) || {
+    nombre_tienda: 'Mi Tienda',
+    jornada_horas: '8',
+    moneda: 'S/',
+    tarifa_hora_defecto: '0'
+  },
   reporte: (cacheInicial && cacheInicial.reporte) || null,
   registrosServidor: (cacheInicial && cacheInicial.registrosServidor) || [],
   registros: [],
@@ -382,7 +425,9 @@ async function sincronizarColaOffline(silencioso = false) {
 }
 
 /* ================================================================
-   Comunicación con el servidor
+   [ETIQUETA: COMUNICACIÓN CON SERVIDOR, TOASTS Y CONFIRMACIÓN]
+   Qué hace: Ejecuta peticiones `/api`, detecta caídas de red para
+   activar el modo offline, muestra notificaciones y confirma salida.
    ================================================================ */
 
 function esErrorDeRed(error) {
@@ -497,6 +542,11 @@ function confirmarSalida({ nombre, turno, onConfirmar }) {
   });
 }
 
+/* ================================================================
+   [ETIQUETA: SELECTOR DE PERSONA Y TARJETA DE JORNADA EN VIVO]
+   Qué hace: Muestra la pantalla inicial de selección por nombre o el
+   panel de fichaje con cronómetro, nota de entrada y botones de turno.
+   ================================================================ */
 function colaboradorActual() {
   return state.colaboradores.find((c) => c.id === state.colaboradorId) || null;
 }
@@ -652,6 +702,11 @@ function renderJornada(persona) {
   actualizarReloj();
 }
 
+/* ================================================================
+   [ETIQUETA: EJECUCIÓN ONLINE / OFFLINE DE MARCAJES]
+   Qué hace: Intenta registrar entrada, pausa, reanudación o salida en el
+   servidor y, si falla la red, lo guarda en la cola offline del teléfono.
+   ================================================================ */
 async function ejecutarOEncolarMarcaje({ tipo, turnoId, notas = '' }) {
   const persona = colaboradorActual();
   if (!persona) return;
@@ -727,6 +782,11 @@ async function ejecutarOEncolarMarcaje({ tipo, turnoId, notas = '' }) {
   toast(mensajesOffline[tipo] || '☁️ Marcaje guardado en el teléfono.');
 }
 
+/* ================================================================
+   [ETIQUETA: RESUMEN PERSONAL Y TABLA DE MIS REGISTROS]
+   Qué hace: Carga y dibuja los totales de horas del colaborador y su
+   historial propio (solo lectura), incluyendo turnos pendientes de subir.
+   ================================================================ */
 async function cargarMisDatos(silencioso = false) {
   const persona = colaboradorActual();
   if (!persona) return;
@@ -758,7 +818,10 @@ async function cargarMisDatos(silencioso = false) {
 
 function renderMiResumen(persona, reporte) {
   if (!reporte) return;
-  const t = reporte.totales || { horas: 0, extra: 0, turnos: 0, dias: 0, pausa_minutos: 0 };
+  const t = reporte.totales || { horas: 0, extra: 0, turnos: 0, dias: 0, pausa_minutos: 0, pago: 0 };
+  const moneda = monedaActual(reporte.moneda);
+  const tarifa = tarifaEfectivaPersona(persona);
+  const mostrarPago = tarifa > 0 || (t.pago || 0) > 0;
 
   $('#rango-texto').textContent = `Del ${fechaCorta(reporte.desde)} al ${fechaCorta(reporte.hasta)} · Jornada diaria de ${formatoHoras(reporte.umbral)}`;
 
@@ -769,7 +832,10 @@ function renderMiResumen(persona, reporte) {
     const extraTxt = t.extra > 0
       ? `Incluye <strong class="cell-extra-on">${formatoHoras(t.extra)} de horas extra</strong>.`
       : 'Sin horas extra en este periodo.';
-    cajaTexto.innerHTML = `Hola <strong>${escapar(persona.nombre.split(' ')[0])}</strong>: del <strong>${escapar(fechaCorta(reporte.desde))}</strong> al <strong>${escapar(fechaCorta(reporte.hasta))}</strong> llevas <strong>${formatoHoras(t.horas)} trabajadas</strong> en <strong>${t.dias} día${t.dias === 1 ? '' : 's'}</strong> (${t.turnos} turno${t.turnos === 1 ? '' : 's'}). ${extraTxt}`;
+    const pagoTxt = mostrarPago
+      ? ` Pago estimado: <strong class="cell-pay">${formatoMoneda(t.pago || 0, moneda)}</strong>.`
+      : '';
+    cajaTexto.innerHTML = `Hola <strong>${escapar(persona.nombre.split(' ')[0])}</strong>: del <strong>${escapar(fechaCorta(reporte.desde))}</strong> al <strong>${escapar(fechaCorta(reporte.hasta))}</strong> llevas <strong>${formatoHoras(t.horas)} trabajadas</strong> en <strong>${t.dias} día${t.dias === 1 ? '' : 's'}</strong> (${t.turnos} turno${t.turnos === 1 ? '' : 's'}). ${extraTxt}${pagoTxt}`;
   }
 
   $('#mis-stats').innerHTML = `
@@ -801,6 +867,18 @@ function renderMiResumen(persona, reporte) {
         <span class="stat-label">Pausas totales</span>
       </div>
     </div>
+    ${
+      mostrarPago
+        ? `
+      <div class="stat-card">
+        <div class="stat-icon emerald">${ICONOS.pago}</div>
+        <div class="stat-body">
+          <span class="stat-value">${formatoMoneda(t.pago || 0, moneda)}</span>
+          <span class="stat-label">Mi pago estimado</span>
+        </div>
+      </div>`
+        : ''
+    }
   `;
 }
 
@@ -813,7 +891,7 @@ function renderMisRegistros(registros) {
   if (!registros.length) {
     cuerpo.innerHTML = `
       <tr class="empty-row">
-        <td colspan="7">No tienes registros en este rango de fechas.</td>
+        <td colspan="8">No tienes registros en este rango de fechas.</td>
       </tr>
     `;
     pie.innerHTML = '';
@@ -821,21 +899,35 @@ function renderMisRegistros(registros) {
     return;
   }
 
-  const porDiaExtra = new Map();
+  const persona = colaboradorActual();
+  const tarifa = tarifaEfectivaPersona(persona);
+  const moneda = monedaActual(state.reporte && state.reporte.moneda);
+
+  const porIdReporte = new Map();
   if (state.reporte && Array.isArray(state.reporte.detalle)) {
     for (const d of state.reporte.detalle) {
-      porDiaExtra.set(d.id, d.extra_dia || 0);
+      porIdReporte.set(d.id, { extra: d.extra_dia || 0, pago: d.pago || 0 });
     }
   }
 
   let totalHoras = 0;
   let totalPausa = 0;
+  let pagoOfflineCerrado = 0;
 
   cuerpo.innerHTML = registros
     .map((turno) => {
       totalHoras += turno.horas || 0;
       totalPausa += turno.pausa_minutos || 0;
-      const extraDia = porDiaExtra.get(turno.id) || 0;
+      const infoRep = porIdReporte.get(turno.id);
+      const extraDia = infoRep ? infoRep.extra : 0;
+      const pagoTurno = infoRep
+        ? infoRep.pago
+        : turno.horas !== null && tarifa > 0
+          ? Math.round(turno.horas * tarifa * 100) / 100
+          : 0;
+      if (turno.pendiente_offline && turno.horas !== null) {
+        pagoOfflineCerrado += pagoTurno;
+      }
       const insignia = turno.activo
         ? insigniaEstado(turno)
         : turno.pendiente_offline
@@ -855,6 +947,7 @@ function renderMisRegistros(registros) {
           <td class="cell-mono" data-label="Pausa">${turno.pausa_minutos ? formatoMinutos(turno.pausa_minutos) : '—'}</td>
           <td class="cell-mono" data-label="Horas"><strong>${turno.horas !== null ? formatoHoras(turno.horas) : 'En curso'}</strong></td>
           <td class="cell-mono${extraDia ? ' cell-extra-on' : ''}" data-label="Extra del día">${extraDia ? formatoHoras(extraDia) : '—'}</td>
+          <td class="cell-mono${pagoTurno > 0 ? ' cell-pay' : ''}" data-label="Pago">${pagoTurno > 0 ? formatoMoneda(pagoTurno, moneda) : '—'}</td>
           <td data-label="Estado">${insignia}</td>
         </tr>
       `;
@@ -862,6 +955,14 @@ function renderMisRegistros(registros) {
     .join('');
 
   const totalExtra = (state.reporte && state.reporte.totales && state.reporte.totales.extra) || 0;
+  const totalPagoFinal =
+    state.reporte && state.reporte.totales
+      ? Math.round((Number(state.reporte.totales.pago || 0) + pagoOfflineCerrado) * 100) / 100
+      : tarifa > 0
+        ? Math.round(totalHoras * tarifa * 100) / 100
+        : 0;
+  const mostrarPagoTotal = tarifa > 0 || totalPagoFinal > 0;
+
   pie.innerHTML = `
     <tr class="total-row">
       <td>Totales</td>
@@ -870,11 +971,13 @@ function renderMisRegistros(registros) {
       <td data-label="Pausa">${totalPausa ? formatoMinutos(totalPausa) : '—'}</td>
       <td data-label="Horas">${formatoHoras(totalHoras)}</td>
       <td data-label="Extra del día">${totalExtra ? formatoHoras(totalExtra) : '—'}</td>
+      <td data-label="Pago">${mostrarPagoTotal ? formatoMoneda(totalPagoFinal, moneda) : '—'}</td>
       <td></td>
     </tr>
   `;
 
-  nota.textContent = `${registros.length} registro${registros.length === 1 ? '' : 's'} · ${formatoHoras(totalHoras)} trabajadas`;
+  const notaPago = mostrarPagoTotal ? ` · ${formatoMoneda(totalPagoFinal, moneda)}` : '';
+  nota.textContent = `${registros.length} registro${registros.length === 1 ? '' : 's'} · ${formatoHoras(totalHoras)} trabajadas${notaPago}`;
 }
 
 function elegirPersona(id) {
@@ -908,6 +1011,11 @@ function rangoRapido(tipo) {
   return { desde: `${hoy.getFullYear()}-${pad2(hoy.getMonth() + 1)}-01`, hasta: iso(hoy) };
 }
 
+/* ================================================================
+   [ETIQUETA: RELOJ EN VIVO, EVENTOS Y ARRANQUE DEL PORTAL]
+   Qué hace: Registra Service Worker, restaura caché al instante, escucha
+   eventos online/offline y reintenta sincronización cada 10 segundos.
+   ================================================================ */
 function actualizarReloj() {
   const ahora = new Date();
   const reloj = $('#live-clock');

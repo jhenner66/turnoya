@@ -1,14 +1,18 @@
 /**
- * Datos de ejemplo para probar la aplicación.
+ * [ETIQUETA: GENERADOR DE DATOS DE DEMOSTRACIÓN]
+ * Qué hace: Pobla la base de datos local vacía con 5 colaboradores y turnos
+ * de ejemplo (incluyendo un turno abierto hoy) para probar la app.
  * Uso: npm run demo
  */
 const { uno, todos, ejecutar, lote } = require('../db');
 
+const imprimir = (linea = '') => process.stdout.write(`${linea}\n`);
+
 async function main() {
   const existentes = await uno('SELECT COUNT(*) AS total FROM colaboradores');
   if (Number(existentes.total) > 0) {
-    console.log('Ya existen colaboradores en la base de datos. No se agregaron datos de ejemplo.');
-    console.log('Si quieres empezar de cero, detén el servidor y elimina la carpeta "data".');
+    imprimir('Ya existen colaboradores en la base de datos. No se agregaron datos de ejemplo.');
+    imprimir('Si quieres empezar de cero, detén el servidor y elimina la carpeta "data".');
     process.exit(0);
   }
 
@@ -73,10 +77,10 @@ async function main() {
   );
   creados += 1;
 
-  console.log('');
-  console.log(`Datos de ejemplo creados: ${colaboradores.length} colaboradores y ${creados} turnos.`);
-  console.log('Inicia la aplicación con: npm start');
-  console.log('');
+  imprimir('');
+  imprimir(`Datos de ejemplo creados: ${colaboradores.length} colaboradores y ${creados} turnos.`);
+  imprimir('Inicia la aplicación con: npm start');
+  imprimir('');
 }
 
 main().catch((error) => {

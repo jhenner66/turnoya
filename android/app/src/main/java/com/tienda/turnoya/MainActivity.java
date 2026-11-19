@@ -38,6 +38,7 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
 
+    /* [ETIQUETA: CONSTANTES Y REFERENCIAS DE INTERFAZ ANDROID] */
     private static final String PREFS = "turnoya";
     private static final String KEY_URL = "server_url";
     private static final String URL_POR_DEFECTO = "https://turnoya-phi.vercel.app";
@@ -60,6 +61,7 @@ public class MainActivity extends Activity {
     private String descargaPendienteNombre;
     private String descargaPendienteMime;
 
+    /* [ETIQUETA: CICLO DE VIDA E INICIALIZACIÓN DE LA APP ANDROID] */
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -130,6 +132,7 @@ public class MainActivity extends Activity {
         }
     }
 
+    /* [ETIQUETA: CONFIGURACIÓN DEL WEBVIEW Y CACHÉ OFFLINE] */
     private void configurarWebView() {
         WebSettings ajustes = webView.getSettings();
         ajustes.setJavaScriptEnabled(true);
@@ -213,7 +216,7 @@ public class MainActivity extends Activity {
         });
     }
 
-    /* ------------------------- Conexión y errores ------------------------ */
+    /* [ETIQUETA: GESTIÓN DE CONEXIÓN, ENLACES INTERNOS Y ERRORES] */
 
     private void conectarDesdeFormulario(boolean modoColaborador) {
         String normalizada = normalizarUrl(urlInput.getText().toString());
@@ -405,7 +408,7 @@ public class MainActivity extends Activity {
         return resultado;
     }
 
-    /* ----------------------------- Descargas ----------------------------- */
+    /* [ETIQUETA: DESCARGA DE REPORTES EXCEL Y PERMISOS DE ALMACENAMIENTO] */
 
     private void solicitarDescarga(String url, String contentDisposition, String mimeType) {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P
@@ -475,7 +478,7 @@ public class MainActivity extends Activity {
         descargaPendienteMime = null;
     }
 
-    /* ------------------------------- Menú -------------------------------- */
+    /* [ETIQUETA: MENÚ SUPERIOR DE CAMBIO DE MODO (COLABORADOR / ADMIN)] */
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
@@ -544,7 +547,7 @@ public class MainActivity extends Activity {
             .show();
     }
 
-    /* ------------------------- Navegación y atrás ------------------------ */
+    /* [ETIQUETA: NAVEGACIÓN CON BOTÓN ATRÁS DE ANDROID] */
 
     @Override
     public void onBackPressed() {

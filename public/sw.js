@@ -1,6 +1,11 @@
 'use strict';
 
-const CACHE_NAME = 'turnoya-offline-v1';
+/* ==================================================================
+ * [ETIQUETA: CONFIGURACIÓN DE CACHÉ OFFLINE (SERVICE WORKER)]
+ * Qué hace: Define la versión de caché y la lista de archivos esenciales
+ * para que la app y el portal /mi-turno abran aunque no haya Internet.
+ * ================================================================== */
+const CACHE_NAME = 'turnoya-offline-v2';
 const ARCHIVOS_BASE = [
   '/',
   '/mi-turno',
@@ -12,6 +17,7 @@ const ARCHIVOS_BASE = [
   '/manifest.json'
 ];
 
+// [ETIQUETA: INSTALACIÓN Y PRECARGA] Descarga los archivos base en caché al instalarse.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(ARCHIVOS_BASE)).catch(() => {})
@@ -19,6 +25,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
+// [ETIQUETA: ACTIVACIÓN Y LIMPIEZA] Elimina versiones anteriores de la caché.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((claves) =>
@@ -32,6 +39,8 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// [ETIQUETA: INTERCEPTOR RED-PRIMERO CON RESPALDO LOCAL]
+// Intenta descargar la versión más reciente; si falla la red, entrega desde caché.
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;

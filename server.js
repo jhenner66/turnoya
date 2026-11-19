@@ -1,3 +1,9 @@
+/* ==================================================================
+ * [ETIQUETA: CONFIGURACIÓN DEL SERVIDOR Y ZONA HORARIA]
+ * Qué hace: Configura la zona horaria (`TURNOYA_TZ`), carga Express,
+ * el módulo de base de datos (`db.js`) y las variables de puerto/host.
+ * ================================================================== */
+
 // Zona horaria configurable: en Vercel `TZ` es un nombre reservado, por eso
 // se usa TURNOYA_TZ (por ejemplo America/Caracas). Si no se define, se usa
 // la zona horaria del sistema.
@@ -32,6 +38,12 @@ const HOST = process.env.HOST || '0.0.0.0';
 const VERSION = paquete.version || '1.0.0';
 
 app.disable('x-powered-by');
+
+/* ==================================================================
+ * [ETIQUETA: SEGURIDAD HTTP Y ARCHIVOS ESTÁTICOS]
+ * Qué hace: Aplica cabeceras CSP/anti-clickjacking, parseo JSON,
+ * sirve `public/`, expone `/mi-turno` y prepara la BD antes de `/api`.
+ * ================================================================== */
 
 // Cabeceras básicas de seguridad.
 app.use((req, res, next) => {
@@ -72,9 +84,11 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-/* ------------------------------------------------------------------ */
-/* Utilidades                                                          */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: UTILIDADES DE FECHAS, VALIDACIÓN Y MAPEO]
+ * Qué hace: Formatea fechas/horas locales, valida rangos y solapamientos
+ * de turnos, calcula duración neta y lee/guarda la configuración.
+ * ================================================================== */
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -198,15 +212,31 @@ async function umbralDiario() {
 }
 
 function mapearColaborador(fila) {
+  const tarifa = fila.tarifa_hora;
   return {
     id: fila.id,
     nombre: fila.nombre,
     puesto: fila.puesto,
     email: fila.email,
     telefono: fila.telefono,
+    tarifa_hora:
+      tarifa === null || tarifa === undefined || tarifa === ''
+        ? null
+        : redondear(Number(tarifa)),
     activo: Boolean(fila.activo),
     creado_en: fila.creado_en
   };
+}
+
+function leerTarifaOpcional(valor, campo = 'La tarifa por hora') {
+  if (valor === undefined || valor === null || String(valor).trim() === '') {
+    return null;
+  }
+  const n = Number(valor);
+  if (!Number.isFinite(n) || n < 0 || n > 100000) {
+    throw new HttpError(400, `${campo} debe ser un número entre 0 y 100000.`);
+  }
+  return redondear(n);
 }
 
 function horasTurno(fila) {
@@ -237,7 +267,8 @@ function mapearTurno(fila) {
 }
 
 const SELECT_TURNOS = `
-  SELECT t.*, c.nombre AS colaborador_nombre, c.puesto AS colaborador_puesto
+  SELECT t.*, c.nombre AS colaborador_nombre, c.puesto AS colaborador_puesto,
+         c.tarifa_hora AS colaborador_tarifa_hora
   FROM turnos t
   JOIN colaboradores c ON c.id = t.colaborador_id
 `;
@@ -309,9 +340,10 @@ function leerRango(req) {
   return { desde, hasta };
 }
 
-/* ------------------------------------------------------------------ */
-/* Colaboradores                                                       */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: API CRUD DE COLABORADORES]
+ * Qué hace: Lista, crea, edita y elimina integrantes del equipo.
+ * ================================================================== */
 
 app.get(
   '/api/colaboradores',
@@ -326,18 +358,21 @@ app.get(
 app.post(
   '/api/colaboradores',
   ruta(async (req, res) => {
-    const nombre = texto(req.body.nombre, 80);
+    const body = req.body || {};
+    const nombre = texto(body.nombre, 80);
     if (!nombre) throw new HttpError(400, 'El nombre es obligatorio.');
+    const tarifaHora = leerTarifaOpcional(body.tarifa_hora);
 
     const info = await ejecutar(
-      `INSERT INTO colaboradores (nombre, puesto, email, telefono, activo, creado_en)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO colaboradores (nombre, puesto, email, telefono, tarifa_hora, activo, creado_en)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
         nombre,
-        texto(req.body.puesto, 80),
-        texto(req.body.email, 120),
-        texto(req.body.telefono, 40),
-        req.body.activo === false ? 0 : 1,
+        texto(body.puesto, 80),
+        texto(body.email, 120),
+        texto(body.telefono, 40),
+        tarifaHora,
+        body.activo === false ? 0 : 1,
         aISOlocal()
       ]
     );
@@ -352,22 +387,28 @@ app.post(
 app.put(
   '/api/colaboradores/:id',
   ruta(async (req, res) => {
+    const body = req.body || {};
     const id = Number(req.params.id);
-    await exigirColaborador(id);
+    const actual = await exigirColaborador(id);
 
-    const nombre = texto(req.body.nombre, 80);
+    const nombre = texto(body.nombre, 80);
     if (!nombre) throw new HttpError(400, 'El nombre es obligatorio.');
+    const tarifaHora =
+      body.tarifa_hora !== undefined
+        ? leerTarifaOpcional(body.tarifa_hora)
+        : actual.tarifa_hora ?? null;
 
     await ejecutar(
       `UPDATE colaboradores
-       SET nombre = ?, puesto = ?, email = ?, telefono = ?, activo = ?
+       SET nombre = ?, puesto = ?, email = ?, telefono = ?, tarifa_hora = ?, activo = ?
        WHERE id = ?`,
       [
         nombre,
-        texto(req.body.puesto, 80),
-        texto(req.body.email, 120),
-        texto(req.body.telefono, 40),
-        req.body.activo === false ? 0 : 1,
+        texto(body.puesto, 80),
+        texto(body.email, 120),
+        texto(body.telefono, 40),
+        tarifaHora,
+        body.activo === false ? 0 : 1,
         id
       ]
     );
@@ -391,9 +432,11 @@ app.delete(
   })
 );
 
-/* ------------------------------------------------------------------ */
-/* Estado en vivo                                                      */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: API DE ESTADO EN VIVO (TABLERO DE HOY)]
+ * Qué hace: Devuelve quién está en turno o en pausa en tiempo real
+ * y el acumulado de horas trabajadas en la fecha actual.
+ * ================================================================== */
 
 app.get(
   '/api/estado',
@@ -438,9 +481,11 @@ app.get(
   })
 );
 
-/* ------------------------------------------------------------------ */
-/* Turnos                                                              */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: API DE TURNOS, FICHAJE Y SINCRONIZACIÓN OFFLINE]
+ * Qué hace: Consulta turnos, marca entrada/pausa/reanudar/salida,
+ * procesa cola offline (`/api/sincronizar`) y permite edición manual.
+ * ================================================================== */
 
 app.get(
   '/api/turnos',
@@ -486,7 +531,8 @@ function leerMomentoOpcional(valor) {
 app.post(
   '/api/turnos/entrada',
   ruta(async (req, res) => {
-    const colaborador = await exigirColaborador(req.body.colaborador_id);
+    const body = req.body || {};
+    const colaborador = await exigirColaborador(body.colaborador_id);
     if (!colaborador.activo) {
       throw new HttpError(400, 'El colaborador está inactivo.');
     }
@@ -499,10 +545,10 @@ app.post(
       throw new HttpError(409, 'Este colaborador ya tiene un turno abierto.');
     }
 
-    const ahora = leerMomentoOpcional(req.body.momento);
+    const ahora = leerMomentoOpcional(body.momento);
     const info = await ejecutar(
       'INSERT INTO turnos (colaborador_id, fecha, entrada, notas, creado_en) VALUES (?, ?, ?, ?, ?)',
-      [colaborador.id, ahora.slice(0, 10), ahora, texto(req.body.notas, 500), aISOlocal()]
+      [colaborador.id, ahora.slice(0, 10), ahora, texto(body.notas, 500), aISOlocal()]
     );
 
     res.status(201).json(mapearTurno(await obtenerTurno(info.lastInsertRowid)));
@@ -512,6 +558,7 @@ app.post(
 app.post(
   '/api/turnos/:id/pausa/iniciar',
   ruta(async (req, res) => {
+    const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (turno.salida) throw new HttpError(400, 'El turno ya está cerrado.');
@@ -520,7 +567,7 @@ app.post(
     }
 
     await ejecutar('UPDATE turnos SET pausa_inicio = ? WHERE id = ?', [
-      leerMomentoOpcional(req.body.momento),
+      leerMomentoOpcional(body.momento),
       turno.id
     ]);
     res.json(mapearTurno(await obtenerTurno(turno.id)));
@@ -530,13 +577,14 @@ app.post(
 app.post(
   '/api/turnos/:id/pausa/finalizar',
   ruta(async (req, res) => {
+    const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (!turno.pausa_inicio) {
       throw new HttpError(409, 'No hay una pausa en curso.');
     }
 
-    const momento = leerMomentoOpcional(req.body.momento);
+    const momento = leerMomentoOpcional(body.momento);
     const minutos = minutosEntre(turno.pausa_inicio, momento);
     await ejecutar(
       'UPDATE turnos SET pausa_inicio = NULL, pausa_minutos = pausa_minutos + ? WHERE id = ?',
@@ -550,11 +598,12 @@ app.post(
 app.post(
   '/api/turnos/:id/salida',
   ruta(async (req, res) => {
+    const body = req.body || {};
     const turno = await obtenerTurno(req.params.id);
     if (!turno) throw new HttpError(404, 'El turno no existe.');
     if (turno.salida) throw new HttpError(409, 'El turno ya está cerrado.');
 
-    const ahora = leerMomentoOpcional(req.body.momento);
+    const ahora = leerMomentoOpcional(body.momento);
     let pausaMinutos = Number(turno.pausa_minutos || 0);
     if (turno.pausa_inicio) {
       pausaMinutos += minutosEntre(turno.pausa_inicio, ahora);
@@ -575,7 +624,8 @@ app.post(
 app.post(
   '/api/sincronizar',
   ruta(async (req, res) => {
-    const lista = Array.isArray(req.body.acciones) ? req.body.acciones.slice(0, 100) : [];
+    const body = req.body || {};
+    const lista = Array.isArray(body.acciones) ? body.acciones.slice(0, 100) : [];
     let aplicadas = 0;
 
     for (const item of lista) {
@@ -751,9 +801,11 @@ app.delete(
   })
 );
 
-/* ------------------------------------------------------------------ */
-/* Reportes                                                            */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: MOTOR DE REPORTES Y CÁLCULO DE HORAS EXTRA]
+ * Qué hace: Agrupa turnos completados por colaborador y por día,
+ * calculando el excedente diario sobre la jornada configurada.
+ * ================================================================== */
 
 async function calcularReporte({ desde, hasta, colaboradorId }) {
   const condiciones = ['t.salida IS NOT NULL'];
@@ -778,10 +830,43 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
     parametros
   );
 
-  const umbral = await umbralDiario();
-  const detalle = filas.map(mapearTurno);
+  const config = await leerConfig();
+  const valorUmbral = Number(config.jornada_horas);
+  const umbral =
+    Number.isFinite(valorUmbral) && valorUmbral > 0 && valorUmbral <= 24 ? valorUmbral : 8;
+  const moneda = texto(config.moneda, 8) || 'S/';
+  const valorTarifaDefecto = Number(config.tarifa_hora_defecto);
+  const tarifaDefecto =
+    Number.isFinite(valorTarifaDefecto) && valorTarifaDefecto >= 0
+      ? redondear(valorTarifaDefecto)
+      : 0;
 
-  // Horas extra por colaborador y día (no por turno suelto).
+  const tarifasPorColaborador = new Map();
+  for (const fila of filas) {
+    if (!tarifasPorColaborador.has(fila.colaborador_id)) {
+      const propia =
+        fila.colaborador_tarifa_hora !== null &&
+        fila.colaborador_tarifa_hora !== undefined &&
+        fila.colaborador_tarifa_hora !== '';
+      tarifasPorColaborador.set(fila.colaborador_id, {
+        propia,
+        tarifa: propia ? redondear(Number(fila.colaborador_tarifa_hora)) : tarifaDefecto
+      });
+    }
+  }
+
+  const detalle = filas.map((fila) => {
+    const t = mapearTurno(fila);
+    const infoTarifa = tarifasPorColaborador.get(t.colaborador_id) || {
+      propia: false,
+      tarifa: tarifaDefecto
+    };
+    t.tarifa_hora = infoTarifa.tarifa;
+    t.pago = redondear((t.horas || 0) * infoTarifa.tarifa);
+    return t;
+  });
+
+  // Horas extra y pago por colaborador y día (tarifa 1x para horas normales y extra).
   const dias = new Map();
   for (const turno of detalle) {
     const clave = `${turno.colaborador_id}|${turno.fecha}`;
@@ -793,7 +878,9 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
       horas: 0,
       pausa_minutos: 0,
       turnos: 0,
-      extra: 0
+      extra: 0,
+      tarifa_hora: turno.tarifa_hora,
+      pago: 0
     };
     acumulado.horas += turno.horas || 0;
     acumulado.pausa_minutos += turno.pausa_minutos || 0;
@@ -804,6 +891,7 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
     dia.horas = redondear(dia.horas);
     dia.pausa_minutos = redondear(dia.pausa_minutos);
     dia.extra = redondear(Math.max(0, dia.horas - umbral));
+    dia.pago = redondear(dia.horas * dia.tarifa_hora);
   }
 
   for (const turno of detalle) {
@@ -813,21 +901,29 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
 
   const porColaborador = new Map();
   for (const dia of dias.values()) {
+    const infoTarifa = tarifasPorColaborador.get(dia.colaborador_id) || {
+      propia: false,
+      tarifa: tarifaDefecto
+    };
     const acumulado = porColaborador.get(dia.colaborador_id) || {
       colaborador_id: dia.colaborador_id,
       colaborador_nombre: dia.colaborador_nombre,
       colaborador_puesto: dia.colaborador_puesto,
+      tarifa_hora: infoTarifa.tarifa,
+      tarifa_propia: infoTarifa.propia,
       turnos: 0,
       dias: 0,
       horas: 0,
       pausa_minutos: 0,
-      extra: 0
+      extra: 0,
+      pago: 0
     };
     acumulado.turnos += dia.turnos;
     acumulado.dias += 1;
     acumulado.horas += dia.horas;
     acumulado.pausa_minutos += dia.pausa_minutos;
     acumulado.extra += dia.extra;
+    acumulado.pago += dia.pago;
     porColaborador.set(dia.colaborador_id, acumulado);
   }
 
@@ -838,12 +934,14 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
       turnos: 0,
       horas: 0,
       pausa_minutos: 0,
-      extra: 0
+      extra: 0,
+      pago: 0
     };
     acumulado.turnos += dia.turnos;
     acumulado.horas += dia.horas;
     acumulado.pausa_minutos += dia.pausa_minutos;
     acumulado.extra += dia.extra;
+    acumulado.pago += dia.pago;
     porDia.set(dia.fecha, acumulado);
   }
 
@@ -852,7 +950,8 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
       ...c,
       horas: redondear(c.horas),
       pausa_minutos: redondear(c.pausa_minutos),
-      extra: redondear(c.extra)
+      extra: redondear(c.extra),
+      pago: redondear(c.pago)
     }))
     .sort((a, b) => b.horas - a.horas);
 
@@ -861,7 +960,8 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
       ...d,
       horas: redondear(d.horas),
       pausa_minutos: redondear(d.pausa_minutos),
-      extra: redondear(d.extra)
+      extra: redondear(d.extra),
+      pago: redondear(d.pago)
     }))
     .sort((a, b) => a.fecha.localeCompare(b.fecha));
 
@@ -873,13 +973,16 @@ async function calcularReporte({ desde, hasta, colaboradorId }) {
     pausa_minutos: redondear(
       listaColaboradores.reduce((s, c) => s + c.pausa_minutos, 0)
     ),
-    extra: redondear(listaColaboradores.reduce((s, c) => s + c.extra, 0))
+    extra: redondear(listaColaboradores.reduce((s, c) => s + c.extra, 0)),
+    pago: redondear(listaColaboradores.reduce((s, c) => s + c.pago, 0))
   };
 
   return {
     desde,
     hasta,
     umbral,
+    moneda,
+    tarifa_defecto: tarifaDefecto,
     detalle,
     por_colaborador: listaColaboradores,
     por_dia: listaDias,
@@ -949,6 +1052,8 @@ app.get(
         'Pausa (min)',
         'Horas trabajadas',
         'Horas extra del día',
+        `Tarifa/h (${reporte.moneda})`,
+        `Pago (${reporte.moneda})`,
         'Notas'
       ]
         .map(celdaCSV)
@@ -966,6 +1071,8 @@ app.get(
           numeroCSV(turno.pausa_minutos),
           numeroCSV(turno.horas || 0),
           numeroCSV(turno.extra_dia || 0),
+          numeroCSV(turno.tarifa_hora || 0),
+          numeroCSV(turno.pago || 0),
           turno.notas
         ]
           .map(celdaCSV)
@@ -975,7 +1082,19 @@ app.get(
 
     lineas.push('');
     lineas.push(
-      ['Totales', '', '', '', '', numeroCSV(reporte.totales.pausa_minutos), numeroCSV(reporte.totales.horas), numeroCSV(reporte.totales.extra), '']
+      [
+        'Totales',
+        '',
+        '',
+        '',
+        '',
+        numeroCSV(reporte.totales.pausa_minutos),
+        numeroCSV(reporte.totales.horas),
+        numeroCSV(reporte.totales.extra),
+        '',
+        numeroCSV(reporte.totales.pago),
+        ''
+      ]
         .map(celdaCSV)
         .join(';')
     );
@@ -994,9 +1113,11 @@ app.get(
 
 const exceljs = require('exceljs');
 
-/* ------------------------------------------------------------------ */
-/* Exportación Excel                                                   */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: EXPORTACIÓN A EXCEL (.XLSX)]
+ * Qué hace: Genera un libro Excel con hoja "Resumen" y hoja "Registros"
+ * usando ExcelJS con estilos, totales y autofiltro.
+ * ================================================================== */
 
 app.get(
   '/api/reportes/excel',
@@ -1027,6 +1148,8 @@ app.get(
     const colorEncabezado = '1F3864';
     const colorSub = 'D9E2F3';
     const colorTotales = 'FFF2CC';
+    const moneda = reporte.moneda || 'S/';
+    const fmtMoneda = `"${moneda.replaceAll('"', '')} "#,##0.00`;
 
     /* ---------------- Hoja: Resumen ---------------- */
     const hojaResumen = libro.addWorksheet('Resumen', {
@@ -1036,28 +1159,31 @@ app.get(
     hojaResumen.columns = [
       { width: 34 },
       { width: 18 },
+      { width: 12 },
+      { width: 12 },
+      { width: 14 },
+      { width: 12 },
       { width: 14 },
       { width: 14 },
-      { width: 14 },
-      { width: 14 }
+      { width: 16 }
     ];
 
-    hojaResumen.mergeCells('A1:F1');
+    hojaResumen.mergeCells('A1:I1');
     const titulo = hojaResumen.getCell('A1');
-    titulo.value = `Control de Horas · ${nombreTienda}`;
+    titulo.value = `Control de Horas y Nómina · ${nombreTienda}`;
     titulo.font = { size: 16, bold: true, color: { argb: 'FFFFFF' } };
     titulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorEncabezado } };
     titulo.alignment = { vertical: 'middle', horizontal: 'center' };
     hojaResumen.getRow(1).height = 26;
 
-    hojaResumen.mergeCells('A2:F2');
+    hojaResumen.mergeCells('A2:I2');
     const subtitulo = hojaResumen.getCell('A2');
     subtitulo.value = `Reporte del ${fechaCorta(desde)} al ${fechaCorta(hasta)} · Jornada diaria de ${reporte.umbral} h`;
     subtitulo.font = { size: 11, italic: true, color: { argb: '404040' } };
     subtitulo.alignment = { vertical: 'middle', horizontal: 'center' };
     hojaResumen.getRow(2).height = 18;
 
-    hojaResumen.mergeCells('A3:F3');
+    hojaResumen.mergeCells('A3:I3');
     const generado = hojaResumen.getCell('A3');
     generado.value = `Generado el ${fechaCorta(hoyISO())} a las ${horaCorta(aISOlocal())} · TurnoYa ${VERSION}`;
     generado.font = { size: 9, color: { argb: '808080' } };
@@ -1071,6 +1197,7 @@ app.get(
     const totales = [
       ['Horas trabajadas', reporte.totales.horas, 'h'],
       ['Horas extra', reporte.totales.extra, 'h'],
+      ['Pago total estimado', reporte.totales.pago, moneda],
       ['Turnos completados', reporte.totales.turnos, 'turnos'],
       ['Colaboradores', reporte.totales.colaboradores, 'personas'],
       ['Días con actividad', reporte.totales.dias, 'días'],
@@ -1081,7 +1208,10 @@ app.get(
       hojaResumen.getCell(`A${fila}`).font = { bold: true };
       hojaResumen.getCell(`B${fila}`).value = valor;
       hojaResumen.getCell(`B${fila}`).alignment = { horizontal: 'center' };
-      if (unidad === 'h' || unidad === 'min') {
+      if (unidad === moneda) {
+        hojaResumen.getCell(`B${fila}`).numFmt = fmtMoneda;
+        hojaResumen.getCell(`B${fila}`).font = { bold: true };
+      } else if (unidad === 'h' || unidad === 'min') {
         hojaResumen.getCell(`B${fila}`).numFmt = '0.00';
       }
       hojaResumen.getCell(`C${fila}`).value = unidad;
@@ -1095,7 +1225,15 @@ app.get(
     fila += 1;
 
     const encabezadoColabs = [
-      'Colaborador', 'Puesto', 'Días', 'Turnos', 'Pausas (min)', 'Horas', 'Horas extra'
+      'Colaborador',
+      'Puesto',
+      'Días',
+      'Turnos',
+      'Pausas (min)',
+      'Horas',
+      'Horas extra',
+      `Tarifa/h (${moneda})`,
+      `Pago (${moneda})`
     ];
     encabezadoColabs.forEach((texto, indice) => {
       const celda = hojaResumen.getCell(fila, indice + 1);
@@ -1111,7 +1249,6 @@ app.get(
     hojaResumen.getRow(fila).height = 18;
     fila += 1;
 
-    const inicioColabs = fila;
     for (const colaborador of reporte.por_colaborador) {
       hojaResumen.getCell(fila, 1).value = colaborador.colaborador_nombre;
       hojaResumen.getCell(fila, 2).value = colaborador.colaborador_puesto || '—';
@@ -1120,7 +1257,9 @@ app.get(
       hojaResumen.getCell(fila, 5).value = redondear(colaborador.pausa_minutos);
       hojaResumen.getCell(fila, 6).value = redondear(colaborador.horas);
       hojaResumen.getCell(fila, 7).value = redondear(colaborador.extra);
-      for (let i = 1; i <= 7; i++) {
+      hojaResumen.getCell(fila, 8).value = redondear(colaborador.tarifa_hora);
+      hojaResumen.getCell(fila, 9).value = redondear(colaborador.pago);
+      for (let i = 1; i <= 9; i++) {
         const celda = hojaResumen.getCell(fila, i);
         celda.border = {
           top: { style: 'thin', color: { argb: 'D9D9D9' } },
@@ -1129,7 +1268,8 @@ app.get(
           right: { style: 'thin', color: { argb: 'D9D9D9' } }
         };
         if (i >= 3) celda.alignment = { horizontal: 'center' };
-        if (i >= 5) celda.numFmt = '0.00';
+        if (i >= 5 && i <= 7) celda.numFmt = '0.00';
+        if (i >= 8) celda.numFmt = fmtMoneda;
       }
       fila += 1;
     }
@@ -1138,7 +1278,7 @@ app.get(
     const totalesColabs = [
       'TOTALES', '', reporte.totales.dias, reporte.totales.turnos,
       redondear(reporte.totales.pausa_minutos), redondear(reporte.totales.horas),
-      redondear(reporte.totales.extra)
+      redondear(reporte.totales.extra), '', redondear(reporte.totales.pago)
     ];
     totalesColabs.forEach((valor, indice) => {
       const celda = hojaResumen.getCell(fila, indice + 1);
@@ -1150,7 +1290,8 @@ app.get(
         left: { style: 'thin' }, right: { style: 'thin' }
       };
       if (indice >= 2) celda.alignment = { horizontal: 'center' };
-      if (indice >= 4) celda.numFmt = '0.00';
+      if (indice >= 4 && indice <= 6) celda.numFmt = '0.00';
+      if (indice === 8) celda.numFmt = fmtMoneda;
     });
     fila += 2;
 
@@ -1168,10 +1309,11 @@ app.get(
       { header: 'Pausa (min)', key: 'pausa', width: 12 },
       { header: 'Horas', key: 'horas', width: 10 },
       { header: 'Horas extra del día', key: 'extra', width: 14 },
+      { header: `Pago (${moneda})`, key: 'pago', width: 14 },
       { header: 'Notas', key: 'notas', width: 30 }
     ];
 
-    hojaRegistros.mergeCells('A1:I1');
+    hojaRegistros.mergeCells('A1:J1');
     const titulo2 = hojaRegistros.getCell('A1');
     titulo2.value = `Registros de jornada · ${nombreTienda}`;
     titulo2.font = { size: 16, bold: true, color: { argb: 'FFFFFF' } };
@@ -1179,7 +1321,7 @@ app.get(
     titulo2.alignment = { vertical: 'middle', horizontal: 'center' };
     hojaRegistros.getRow(1).height = 26;
 
-    hojaRegistros.mergeCells('A2:I2');
+    hojaRegistros.mergeCells('A2:J2');
     const sub2 = hojaRegistros.getCell('A2');
     sub2.value = `Del ${fechaCorta(desde)} al ${fechaCorta(hasta)} · Generado el ${fechaCorta(hoyISO())}`;
     sub2.font = { size: 10, italic: true, color: { argb: '404040' } };
@@ -1202,6 +1344,7 @@ app.get(
     let filaReg = 5;
     let totalHoras = 0;
     let totalPausa = 0;
+    let totalPago = 0;
     for (const turno of reporte.detalle) {
       hojaRegistros.getCell(filaReg, 1).value = turno.fecha;
       hojaRegistros.getCell(filaReg, 2).value = turno.colaborador_nombre;
@@ -1211,9 +1354,10 @@ app.get(
       hojaRegistros.getCell(filaReg, 6).value = redondear(turno.pausa_minutos);
       hojaRegistros.getCell(filaReg, 7).value = turno.horas !== null ? redondear(turno.horas) : null;
       hojaRegistros.getCell(filaReg, 8).value = turno.extra_dia ? redondear(turno.extra_dia) : null;
-      hojaRegistros.getCell(filaReg, 9).value = turno.notas || '';
+      hojaRegistros.getCell(filaReg, 9).value = turno.horas !== null ? redondear(turno.pago || 0) : null;
+      hojaRegistros.getCell(filaReg, 10).value = turno.notas || '';
 
-      for (let i = 1; i <= 9; i++) {
+      for (let i = 1; i <= 10; i++) {
         const celda = hojaRegistros.getCell(filaReg, i);
         celda.border = {
           top: { style: 'thin', color: { argb: 'D9D9D9' } },
@@ -1222,13 +1366,18 @@ app.get(
           right: { style: 'thin', color: { argb: 'D9D9D9' } }
         };
         if (i === 1 || i === 4 || i === 5) celda.alignment = { horizontal: 'center' };
-        if (i === 6 || i === 7 || i === 8) {
+        if (i >= 6 && i <= 8) {
           celda.alignment = { horizontal: 'center' };
           celda.numFmt = '0.00';
+        }
+        if (i === 9) {
+          celda.alignment = { horizontal: 'center' };
+          celda.numFmt = fmtMoneda;
         }
       }
       totalHoras += turno.horas || 0;
       totalPausa += turno.pausa_minutos || 0;
+      totalPago += turno.pago || 0;
       filaReg += 1;
     }
 
@@ -1237,7 +1386,8 @@ app.get(
     hojaRegistros.getCell(filaReg, 6).value = redondear(totalPausa);
     hojaRegistros.getCell(filaReg, 7).value = redondear(totalHoras);
     hojaRegistros.getCell(filaReg, 8).value = redondear(reporte.totales.extra);
-    for (let i = 1; i <= 9; i++) {
+    hojaRegistros.getCell(filaReg, 9).value = redondear(totalPago);
+    for (let i = 1; i <= 10; i++) {
       const celda = hojaRegistros.getCell(filaReg, i);
       celda.font = { bold: true };
       celda.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: colorTotales } };
@@ -1245,9 +1395,13 @@ app.get(
         top: { style: 'thin' }, bottom: { style: 'thin' },
         left: { style: 'thin' }, right: { style: 'thin' }
       };
-      if (i === 6 || i === 7 || i === 8) {
+      if (i >= 6 && i <= 8) {
         celda.alignment = { horizontal: 'center' };
         celda.numFmt = '0.00';
+      }
+      if (i === 9) {
+        celda.alignment = { horizontal: 'center' };
+        celda.numFmt = fmtMoneda;
       }
     }
     filaReg += 2;
@@ -1258,7 +1412,7 @@ app.get(
     }
 
     hojaRegistros.views = [{ state: 'frozen', ySplit: 4 }];
-    hojaRegistros.autoFilter = { from: 'A4', to: 'I4' };
+    hojaRegistros.autoFilter = { from: 'A4', to: 'J4' };
 
     const buffer = await libro.xlsx.writeBuffer();
     const nombreArchivo = `reporte-horas-${desde}-a-${hasta}.xlsx`;
@@ -1275,6 +1429,11 @@ app.get(
   })
 );
 
+/* ==================================================================
+ * [ETIQUETA: CONFIGURACIÓN, INFO DE RED, SALUD Y RESPALDO]
+ * Qué hace: Expone `/api/config`, `/api/info` (IPs LAN), `/api/salud`
+ * y `/api/respaldo` (.db en local o .sql en Turso nube).
+ * ================================================================== */
 app.get(
   '/api/config',
   ruta(async (req, res) => {
@@ -1378,27 +1537,46 @@ app.get(
 app.put(
   '/api/config',
   ruta(async (req, res) => {
-    if (req.body.nombre_tienda !== undefined) {
-      const nombre = texto(req.body.nombre_tienda, 60);
+    const body = req.body || {};
+    if (body.nombre_tienda !== undefined) {
+      const nombre = texto(body.nombre_tienda, 60);
       if (!nombre) throw new HttpError(400, 'El nombre de la tienda es obligatorio.');
       await guardarConfig('nombre_tienda', nombre);
     }
 
-    if (req.body.jornada_horas !== undefined) {
-      const horas = Number(req.body.jornada_horas);
+    if (body.jornada_horas !== undefined) {
+      const horas = Number(body.jornada_horas);
       if (!Number.isFinite(horas) || horas < 1 || horas > 24) {
         throw new HttpError(400, 'La jornada diaria debe estar entre 1 y 24 horas.');
       }
       await guardarConfig('jornada_horas', redondear(horas));
     }
 
+    if (body.moneda !== undefined) {
+      const moneda = texto(body.moneda, 8);
+      if (!moneda) throw new HttpError(400, 'La moneda no puede estar vacía.');
+      await guardarConfig('moneda', moneda);
+    }
+
+    if (body.tarifa_hora_defecto !== undefined) {
+      const tarifa = Number(body.tarifa_hora_defecto);
+      if (!Number.isFinite(tarifa) || tarifa < 0 || tarifa > 100000) {
+        throw new HttpError(
+          400,
+          'La tarifa por hora por defecto debe estar entre 0 y 100000.'
+        );
+      }
+      await guardarConfig('tarifa_hora_defecto', redondear(tarifa));
+    }
+
     res.json(await leerConfig());
   })
 );
 
-/* ------------------------------------------------------------------ */
-/* Manejo de errores                                                   */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: MANEJO CENTRALIZADO DE ERRORES]
+ * Qué hace: Convierte HttpError y fallos inesperados en respuestas JSON.
+ * ================================================================== */
 
 app.use('/api', (req, res) => {
   res.status(404).json({ error: 'Ruta no encontrada.' });
@@ -1418,9 +1596,11 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: 'Error interno del servidor.' });
 });
 
-/* ------------------------------------------------------------------ */
-/* Arranque                                                            */
-/* ------------------------------------------------------------------ */
+/* ==================================================================
+ * [ETIQUETA: ARRANQUE DEL SERVIDOR Y CIERRE LIMPIO]
+ * Qué hace: Detecta IPs de red local, prepara SQLite/Turso, inicia HTTP
+ * y cierra conexiones de forma segura al recibir SIGINT o SIGTERM.
+ * ================================================================== */
 
 function direccionesLocales() {
   const interfaces = os.networkInterfaces();
@@ -1433,6 +1613,10 @@ function direccionesLocales() {
   return direcciones;
 }
 
+function imprimir(linea = '') {
+  process.stdout.write(`${linea}\n`);
+}
+
 async function arrancar() {
   try {
     await preparar();
@@ -1442,28 +1626,28 @@ async function arrancar() {
   }
 
   const servidor = app.listen(PORT, HOST, () => {
-    console.log('');
-    console.log(`  TurnoYa ${VERSION} - Control de horas`);
-    console.log('  ----------------------------------------');
+    imprimir('');
+    imprimir(`  TurnoYa ${VERSION} - Control de horas`);
+    imprimir('  ----------------------------------------');
     if (esRemota) {
-      console.log('  Base de datos: Turso (nube)');
+      imprimir('  Base de datos: Turso (nube)');
     } else {
-      console.log(`  Base de datos: ${path.join('data', 'tienda.db')}`);
-      console.log(`  Local:  http://localhost:${PORT}`);
+      imprimir(`  Base de datos: ${path.join('data', 'tienda.db')}`);
+      imprimir(`  Local:  http://localhost:${PORT}`);
       for (const direccion of direccionesLocales()) {
-        console.log(`  Red:    http://${direccion}:${PORT}`);
+        imprimir(`  Red:    http://${direccion}:${PORT}`);
       }
     }
-    console.log('');
-    console.log('  Presiona Ctrl+C para detener el servidor.');
-    console.log('');
+    imprimir('');
+    imprimir('  Presiona Ctrl+C para detener el servidor.');
+    imprimir('');
   });
 
   let cerrando = false;
   function cerrarServidor(senal) {
     if (cerrando) return;
     cerrando = true;
-    console.log(`\n  Cerrando TurnoYa (${senal})…`);
+    imprimir(`\n  Cerrando TurnoYa (${senal})…`);
     servidor.close(async () => {
       await cerrar();
       process.exit(0);

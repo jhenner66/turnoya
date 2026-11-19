@@ -1,14 +1,13 @@
+/* ==================================================================
+ * [ETIQUETA: CAPA DE DATOS HÍBRIDA (SQLite LOCAL / TURSO NUBE)]
+ * Qué hace: Conecta con el archivo local `data/tienda.db` en modo PC
+ * o con la base remota Turso (HTTP) cuando existen variables de nube.
+ * ================================================================== */
+
 const fs = require('node:fs');
 const path = require('node:path');
 
-/*
- * Capa de datos.
- *
- * - En local usa un archivo SQLite en `data/tienda.db` (libSQL embebido).
- * - En la nube usa Turso (libSQL remoto) cuando existe TURSO_DATABASE_URL.
- *   Así el mismo código funciona en la PC y en Vercel sin cambios.
- */
-
+// [ETIQUETA: DETECCIÓN DE MODO LOCAL O NUBE]
 const urlRemota = (
   process.env.TURSO_DATABASE_URL ||
   process.env.DATABASE_URL ||
@@ -26,6 +25,7 @@ const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.join(__dirname, 'data');
 
+// [ETIQUETA: INSTANCIA DEL CLIENTE LIBSQL]
 let cliente;
 if (esRemota) {
   // Cliente HTTP puro: no necesita binarios nativos en el servidor.
@@ -42,7 +42,10 @@ if (esRemota) {
   });
 }
 
-/* --------------------------- Consultas --------------------------- */
+/* ==================================================================
+ * [ETIQUETA: HELPERS DE CONSULTAS SQL]
+ * Qué hace: Simplifica consultas parametrizadas (uno, todos, ejecutar, lote).
+ * ================================================================== */
 
 async function uno(sql, args = []) {
   const resultado = await cliente.execute({ sql, args });
@@ -66,7 +69,11 @@ async function lote(sentencias) {
   return cliente.batch(sentencias, 'write');
 }
 
-/* ------------------------- Inicialización ------------------------ */
+/* ==================================================================
+ * [ETIQUETA: ESQUEMA DE BASE DE DATOS E INICIALIZACIÓN]
+ * Qué hace: Crea las tablas (colaboradores, turnos, configuracion),
+ * sus índices de búsqueda y los valores iniciales por defecto.
+ * ================================================================== */
 
 const ESQUEMA = [
   `CREATE TABLE IF NOT EXISTS colaboradores (
@@ -75,6 +82,7 @@ const ESQUEMA = [
     puesto TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     telefono TEXT NOT NULL DEFAULT '',
+    tarifa_hora REAL DEFAULT NULL,
     activo INTEGER NOT NULL DEFAULT 1,
     creado_en TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
   )`,
@@ -100,7 +108,9 @@ const ESQUEMA = [
 
 const VALORES_POR_DEFECTO = {
   nombre_tienda: 'Mi Tienda',
-  jornada_horas: '8'
+  jornada_horas: '8',
+  moneda: 'S/',
+  tarifa_hora_defecto: '0'
 };
 
 let preparado = null;
@@ -117,6 +127,13 @@ async function inicializar() {
   }
 
   await cliente.batch(ESQUEMA, 'write');
+
+  // Migración segura para bases de datos ya existentes sin columna tarifa_hora.
+  const columnasColab = await cliente.execute('PRAGMA table_info(colaboradores)');
+  const tieneTarifa = columnasColab.rows.some((c) => c.name === 'tarifa_hora');
+  if (!tieneTarifa) {
+    await cliente.execute('ALTER TABLE colaboradores ADD COLUMN tarifa_hora REAL DEFAULT NULL');
+  }
 
   for (const [clave, valor] of Object.entries(VALORES_POR_DEFECTO)) {
     await cliente.execute({
