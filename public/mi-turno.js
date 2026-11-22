@@ -588,6 +588,7 @@ async function api(ruta, opciones = {}) {
     ...opciones,
     headers: {
       'X-TurnoYa-Cliente': '1',
+      'X-TurnoYa-Vista': 'colaborador',
       ...(opciones.headers || {})
     },
     signal: controlador.signal

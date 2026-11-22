@@ -71,12 +71,6 @@
           </svg>
           <span>Vista Colaborador</span>
         </a>
-        <button class="worker-mode-link lock-admin-btn" id="btn-bloquear-admin" type="button">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-          </svg>
-          <span>Bloquear panel</span>
-        </button>
         <div class="store-chip">
           <span class="store-dot" aria-hidden="true"></span>
           <div>
@@ -95,7 +89,6 @@
             <span class="store-dot" aria-hidden="true"></span>
             <strong id="mobile-store-name">Mi Tienda</strong>
             <a class="mobile-worker-pill" href="/mi-turno">Modo Colaborador →</a>
-            <button class="mobile-worker-pill mobile-lock-pill" id="btn-bloquear-movil" type="button" title="Cerrar sesión de administrador">🔒 Bloquear</button>
           </div>
           <h1 id="view-title">Inicio</h1>
           <p id="view-subtitle">Marca entradas, pausas y salidas del personal.</p>
@@ -409,30 +402,6 @@
           </div>
 
           <div class="panel">
-            <div class="panel-head">
-              <div>
-                <h2>Seguridad del Administrador</h2>
-                <p class="muted">Cambia la contraseña o PIN que protege este panel y el Modo Administrador en la APK.</p>
-              </div>
-            </div>
-            <form class="filters config-form" id="form-seguridad-admin">
-              <label>
-                <span>Contraseña / PIN actual</span>
-                <input type="password" id="admin-clave-actual" minlength="4" maxlength="64" required autocomplete="current-password" />
-              </label>
-              <label>
-                <span>Nueva contraseña / PIN</span>
-                <input type="password" id="admin-clave-nueva" minlength="4" maxlength="64" required placeholder="Mínimo 4 caracteres" autocomplete="new-password" />
-              </label>
-              <label>
-                <span>Confirmar nueva clave</span>
-                <input type="password" id="admin-clave-confirmar" minlength="4" maxlength="64" required placeholder="Repite la nueva clave" autocomplete="new-password" />
-              </label>
-              <button class="btn primary" type="submit">Actualizar clave</button>
-            </form>
-          </div>
-
-          <div class="panel">
             <div class="panel-head wrap">
               <div>
                 <h2>Enlace para Colaboradores (Web y APK Android)</h2>
@@ -517,11 +486,6 @@
         </section>
       </div>
     </main>
-  </div>
-
-  <!-- [ETIQUETA: PANTALLA DE BLOQUEO DEL ADMINISTRADOR] Protege todo el panel hasta iniciar sesión o crear la clave inicial. -->
-  <div class="auth-overlay hidden" id="admin-auth-overlay" role="dialog" aria-modal="true" aria-labelledby="admin-auth-title">
-    <div class="auth-card" id="admin-auth-card"></div>
   </div>
 
   <!-- [ETIQUETA: CONTENEDORES GLOBALES Y SCRIPT PRINCIPAL] Modales dinámicos, notificaciones toast y app.js. -->

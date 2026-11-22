@@ -105,7 +105,6 @@ function fechaLarga(fecha) {
 const state = {
   vista: 'inicio',
   online: true,
-  autenticado: false,
   colaboradores: [],
   estado: { activos: [], resumen: {} },
   config: {
@@ -227,23 +226,6 @@ function vibrar(ms = 15) {
   try { navigator?.vibrate?.(ms); } catch { /* no soportado */ }
 }
 
-const CLAVE_TOKEN_ADMIN = 'turnoya_admin_token';
-
-function obtenerTokenAdmin() {
-  try {
-    return sessionStorage.getItem(CLAVE_TOKEN_ADMIN) || '';
-  } catch {
-    return '';
-  }
-}
-
-function guardarTokenAdmin(token) {
-  try {
-    if (token) sessionStorage.setItem(CLAVE_TOKEN_ADMIN, String(token));
-    else sessionStorage.removeItem(CLAVE_TOKEN_ADMIN);
-  } catch { /* ignorar */ }
-}
-
 async function api(ruta, opciones = {}) {
   const controlador = new AbortController();
   const temporizador = setTimeout(() => controlador.abort(), 15000);
@@ -255,10 +237,6 @@ async function api(ruta, opciones = {}) {
     },
     signal: controlador.signal
   };
-  const token = obtenerTokenAdmin();
-  if (token) {
-    config.headers['X-TurnoYa-Admin-Token'] = token;
-  }
   if (opciones.body !== undefined) {
     config.headers['Content-Type'] = 'application/json';
   }
@@ -279,15 +257,6 @@ async function api(ruta, opciones = {}) {
     }
 
     marcarConexion(true);
-
-    if (respuesta.status === 401 && !String(ruta).startsWith('/auth/')) {
-      state.autenticado = false;
-      guardarTokenAdmin('');
-      if (typeof mostrarPantallaAuthAdmin === 'function') {
-        mostrarPantallaAuthAdmin({ configurado: true });
-      }
-      throw new Error((datos && datos.error) || 'Se requiere iniciar sesión.');
-    }
 
     if (!respuesta.ok) {
       throw new Error((datos && datos.error) || `Error ${respuesta.status}`);
@@ -328,8 +297,9 @@ async function reintentarConexion(silencioso = false) {
   }
 
   try {
-    await verificarAccesoYCargar();
-    if (!silencioso && state.autenticado) toast('Datos actualizados.');
+    await api('/salud');
+    await cargarTodo();
+    if (!silencioso) toast('Datos actualizados.');
   } catch (error) {
     if (!silencioso) toast(error.message, 'error');
   } finally {
@@ -1870,7 +1840,6 @@ async function subirColaOffline() {
 }
 
 async function cargarTodo() {
-  if (!state.autenticado) return;
   if (leerColaOffline().length) {
     await subirColaOffline().catch(() => {});
   }
@@ -2304,201 +2273,6 @@ function conectarEventos() {
       boton.disabled = false;
     }
   });
-
-  const btnBloquear = $('#btn-bloquear-admin');
-  if (btnBloquear) btnBloquear.addEventListener('click', cerrarSesionAdmin);
-  const btnBloquearMovil = $('#btn-bloquear-movil');
-  if (btnBloquearMovil) btnBloquearMovil.addEventListener('click', cerrarSesionAdmin);
-
-  const formSeg = $('#form-seguridad-admin');
-  if (formSeg) {
-    formSeg.addEventListener('submit', async (evento) => {
-      evento.preventDefault();
-      const actual = $('#admin-clave-actual').value.trim();
-      const nueva = $('#admin-clave-nueva').value.trim();
-      const confirmar = $('#admin-clave-confirmar').value.trim();
-      if (nueva.length < 4) {
-        toast('La nueva contraseña debe tener al menos 4 caracteres.', 'error');
-        return;
-      }
-      if (nueva !== confirmar) {
-        toast('La confirmación no coincide con la nueva contraseña.', 'error');
-        return;
-      }
-      const boton = formSeg.querySelector('button[type="submit"]');
-      boton.disabled = true;
-      try {
-        const resp = await api('/auth/admin/cambiar', {
-          method: 'POST',
-          body: JSON.stringify({ clave_actual: actual, clave_nueva: nueva })
-        });
-        if (resp && resp.token) guardarTokenAdmin(resp.token);
-        formSeg.reset();
-        toast('Contraseña de administrador actualizada.');
-      } catch (error) {
-        toast(error.message, 'error');
-      } finally {
-        boton.disabled = false;
-      }
-    });
-  }
-}
-
-/* ================================================================
-   [ETIQUETA: PANTALLA DE ACCESO Y BLOQUEO DE ADMINISTRADOR]
-   Qué hace: Protege el panel Admin exigiendo crear clave en el primer
-   uso y validarla en cada sesión web o cambio a Modo Admin en la APK.
-   ================================================================ */
-
-function mostrarPantallaAuthAdmin({ configurado = true } = {}) {
-  const overlay = $('#admin-auth-overlay');
-  const card = $('#admin-auth-card');
-  if (!overlay || !card) return;
-
-  overlay.classList.remove('hidden');
-  const iconoCandado =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>';
-
-  if (!configurado) {
-    card.innerHTML = `
-      <div class="auth-head">
-        <div class="auth-badge">${iconoCandado}</div>
-        <h2 id="admin-auth-title">Protege tu panel de Administrador</h2>
-        <p>Crea una contraseña o PIN (mínimo 4 caracteres) para proteger colaboradores, sueldos, ajustes y el Modo Administrador en la APK.</p>
-      </div>
-      <form class="auth-form" id="form-admin-setup">
-        <label class="field">
-          <span>Nueva contraseña o PIN</span>
-          <input type="password" id="setup-admin-clave" minlength="4" maxlength="64" required placeholder="Mínimo 4 caracteres" autocomplete="new-password" />
-        </label>
-        <label class="field">
-          <span>Confirmar contraseña o PIN</span>
-          <input type="password" id="setup-admin-confirmar" minlength="4" maxlength="64" required placeholder="Repite la clave" autocomplete="new-password" />
-        </label>
-        <p class="auth-error hidden" id="admin-auth-error"></p>
-        <button class="btn primary btn-lg full" type="submit">Guardar clave y entrar</button>
-      </form>
-    `;
-    const form = $('#form-admin-setup', card);
-    const errEl = $('#admin-auth-error', card);
-    $('#setup-admin-clave', card).focus();
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      errEl.classList.add('hidden');
-      const clave = $('#setup-admin-clave', card).value.trim();
-      const conf = $('#setup-admin-confirmar', card).value.trim();
-      if (clave.length < 4) {
-        errEl.textContent = 'Usa al menos 4 caracteres.';
-        errEl.classList.remove('hidden');
-        return;
-      }
-      if (clave !== conf) {
-        errEl.textContent = 'Las claves no coinciden.';
-        errEl.classList.remove('hidden');
-        return;
-      }
-      const btn = form.querySelector('button[type="submit"]');
-      btn.disabled = true;
-      try {
-        const resp = await api('/auth/admin/configurar', {
-          method: 'POST',
-          body: JSON.stringify({ clave })
-        });
-        if (resp && resp.token) guardarTokenAdmin(resp.token);
-        state.autenticado = true;
-        overlay.classList.add('hidden');
-        await cargarTodo();
-        toast('Clave de administrador configurada.');
-      } catch (err) {
-        errEl.textContent = err.message;
-        errEl.classList.remove('hidden');
-      } finally {
-        btn.disabled = false;
-      }
-    });
-    return;
-  }
-
-  card.innerHTML = `
-    <div class="auth-head">
-      <div class="auth-badge">${iconoCandado}</div>
-      <h2 id="admin-auth-title">Acceso de Administrador</h2>
-      <p>Ingresa tu contraseña o PIN para administrar el equipo, calcular pagos y descargar reportes.</p>
-    </div>
-    <form class="auth-form" id="form-admin-login">
-      <label class="field">
-        <span>Contraseña o PIN</span>
-        <input type="password" id="login-admin-clave" maxlength="64" required placeholder="Ingresa tu clave" autocomplete="current-password" />
-      </label>
-      <p class="auth-error hidden" id="admin-auth-error"></p>
-      <button class="btn primary btn-lg full" type="submit">Entrar al panel</button>
-    </form>
-    <div class="auth-foot">
-      <a class="btn ghost full" href="/mi-turno">Soy colaborador → Ir a Mi Turno</a>
-    </div>
-  `;
-  const form = $('#form-admin-login', card);
-  const errEl = $('#admin-auth-error', card);
-  $('#login-admin-clave', card).focus();
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errEl.classList.add('hidden');
-    const clave = $('#login-admin-clave', card).value.trim();
-    const btn = form.querySelector('button[type="submit"]');
-    btn.disabled = true;
-    try {
-      const resp = await api('/auth/admin/login', {
-        method: 'POST',
-        body: JSON.stringify({ clave })
-      });
-      if (resp && resp.token) guardarTokenAdmin(resp.token);
-      state.autenticado = true;
-      overlay.classList.add('hidden');
-      await cargarTodo();
-    } catch (err) {
-      errEl.textContent = err.message;
-      errEl.classList.remove('hidden');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-}
-
-async function cerrarSesionAdmin() {
-  try {
-    await api('/auth/logout', {
-      method: 'POST',
-      body: JSON.stringify({ tipo: 'admin' })
-    });
-  } catch { /* ignorar error de red al bloquear */ }
-  guardarTokenAdmin('');
-  state.autenticado = false;
-  state.colaboradores = [];
-  state.registros = [];
-  state.reporte = null;
-  mostrarPantallaAuthAdmin({ configurado: true });
-  toast('Panel bloqueado.');
-}
-
-async function verificarAccesoYCargar() {
-  const auth = await api('/auth/estado');
-  if (!auth.admin_configurado) {
-    guardarTokenAdmin('');
-    state.autenticado = false;
-    mostrarPantallaAuthAdmin({ configurado: false });
-    return false;
-  }
-  if (!auth.admin_autenticado) {
-    guardarTokenAdmin('');
-    state.autenticado = false;
-    mostrarPantallaAuthAdmin({ configurado: true });
-    return false;
-  }
-  const overlay = $('#admin-auth-overlay');
-  if (overlay) overlay.classList.add('hidden');
-  state.autenticado = true;
-  await cargarTodo();
-  return true;
 }
 
 function aplicarFechasPorDefecto() {
@@ -2510,8 +2284,8 @@ function aplicarFechasPorDefecto() {
 
 /* ================================================================
    [ETIQUETA: ARRANQUE DE LA APLICACIÓN ADMIN]
-   Qué hace: Registra el Service Worker offline, verifica acceso Admin,
-   carga datos iniciales y programa refrescos automáticos.
+   Qué hace: Registra el Service Worker offline, carga datos iniciales y
+   programa refrescos automáticos.
    ================================================================ */
 
 async function iniciar() {
@@ -2524,14 +2298,14 @@ async function iniciar() {
   setInterval(actualizarReloj, 1000);
 
   try {
-    await verificarAccesoYCargar();
+    await cargarTodo();
   } catch (error) {
     marcarConexion(false);
     toast(error.message, 'error');
   }
 
   setInterval(() => {
-    if (state.autenticado && state.vista === 'inicio' && document.visibilityState === 'visible') {
+    if (state.vista === 'inicio' && document.visibilityState === 'visible') {
       refrescarEstado(true);
     }
   }, 30000);
@@ -2546,7 +2320,7 @@ async function iniciar() {
     if (document.visibilityState !== 'visible') return;
     if (!state.online) {
       reintentarConexion(true);
-    } else if (state.autenticado && state.vista === 'inicio') {
+    } else if (state.vista === 'inicio') {
       refrescarEstado(true);
     }
   });

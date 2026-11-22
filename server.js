@@ -116,17 +116,9 @@ app.use('/api', async (req, res, next) => {
     req.secretoAuth = secreto;
     const cookies = parsearCookies(req);
 
-    const candidatoAdmin =
-      req.headers['x-turnoya-admin-token'] || cookies.turnoya_admin || '';
     const candidatoColab =
       req.headers['x-turnoya-colab-token'] || cookies.turnoya_colab || '';
     const candidatoGeneral = req.headers['x-turnoya-auth'] || '';
-
-    let sesionAdmin = verificarTokenSesion(candidatoAdmin, secreto);
-    if ((!sesionAdmin || sesionAdmin.rol !== 'admin') && candidatoGeneral) {
-      const alt = verificarTokenSesion(candidatoGeneral, secreto);
-      if (alt && alt.rol === 'admin') sesionAdmin = alt;
-    }
 
     let sesionColab = verificarTokenSesion(candidatoColab, secreto);
     if ((!sesionColab || sesionColab.rol !== 'colab') && candidatoGeneral) {
@@ -134,7 +126,8 @@ app.use('/api', async (req, res, next) => {
       if (alt && alt.rol === 'colab') sesionColab = alt;
     }
 
-    req.esAdmin = Boolean(sesionAdmin && sesionAdmin.rol === 'admin');
+    const esVistaColaborador = req.headers['x-turnoya-vista'] === 'colaborador';
+    req.esAdmin = !esVistaColaborador;
     req.sesionColabId =
       sesionColab && sesionColab.rol === 'colab' && Number.isInteger(Number(sesionColab.colaborador_id))
         ? Number(sesionColab.colaborador_id)
@@ -492,10 +485,9 @@ async function exigirAccesoColaborador(req, colaboradorId) {
 app.get(
   '/api/auth/estado',
   ruta(async (req, res) => {
-    const hashAdmin = await obtenerHashAdmin();
     res.json({
-      admin_configurado: Boolean(hashAdmin),
-      admin_autenticado: Boolean(req.esAdmin),
+      admin_configurado: true,
+      admin_autenticado: true,
       colaborador_id: req.sesionColabId
     });
   })
